@@ -5,7 +5,7 @@ export function calculateAssetStats(
   asset: Asset,
   transactions: Transaction[],
   _currencyMode: CurrencyMode,
-  globalUsd: number
+  usdRate: number
 ): AssetStats {
   const assetTxs = transactions.filter((tx) => tx.asset_id === asset.id);
 
@@ -24,29 +24,28 @@ export function calculateAssetStats(
     if (dateA !== dateB) return dateA - dateB;
 
     // If exact same date, process BUYS before SELLS to avoid phantom zero balances
-    const isBuyA = a.type === 'BUY' || a.type === 'DEPOSIT';
-    const isBuyB = b.type === 'BUY' || b.type === 'DEPOSIT';
-
-    if (isBuyA && !isBuyB) return -1;
-    if (!isBuyA && isBuyB) return 1;
+    if (a.type === 'BUY' && b.type !== 'BUY') return -1;
+    if (a.type !== 'BUY' && b.type === 'BUY') return 1;
 
     // Final fallback to real creation timestamp
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
 
   sortedTxs.forEach((tx) => {
+    if (tx.type !== 'BUY' && tx.type !== 'SELL') return;
+
     const amount = Number(tx.amount);
     const priceToman = Number(tx.price_toman);
-    const usdRate = Number(tx.usd_rate) || globalUsd;
-    const priceUsd = priceToman / usdRate;
+    const txUsdRate = Number(tx.usd_rate) || usdRate;
+    const priceUsd = priceToman / txUsdRate;
 
-    if (tx.type === 'BUY' || tx.type === 'DEPOSIT') {
+    if (tx.type === 'BUY') {
       totalAmount += amount;
       const txCostToman = amount * priceToman;
       totalCostToman += txCostToman;
       totalCostUsd += amount * priceUsd;
       historicalCostToman += txCostToman;
-    } else if (tx.type === 'SELL' || tx.type === 'WITHDRAW') {
+    } else {
       if (totalAmount > 0) {
         const avgCostToman = totalCostToman / totalAmount;
         const avgCostUsd = totalCostUsd / totalAmount;
@@ -73,7 +72,7 @@ export function calculateAssetStats(
   const avgBuyPriceToman = totalAmount > 0 ? totalCostToman / totalAmount : 0;
   const currentPriceToman = asset.price_toman || 0;
   const currentPriceUsd =
-    asset.price_usd || (currentPriceToman / globalUsd) || 0;
+    asset.price_usd || (usdRate > 0 ? currentPriceToman / usdRate : 0);
 
   const currentValueToman = totalAmount * currentPriceToman;
   const currentValueUsd = totalAmount * currentPriceUsd;

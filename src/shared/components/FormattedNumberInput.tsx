@@ -49,7 +49,10 @@ export function FormattedNumberInput({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const el = e.target;
     const sel = el.selectionStart ?? 0;
-    caretRef.current = { digitsBefore: countDigitsBeforeIndex(display, sel) };
+    // Count digits in the RAW post-change value at the current caret. Using the
+    // stale pre-change `display` here is off-by-one whenever the typed char is
+    // itself a digit, which caused the caret to drift left while typing.
+    caretRef.current = { digitsBefore: countDigitsBeforeIndex(el.value, sel) };
     onValueChange(parseFormattedNumberToCanonical(el.value));
   };
 

@@ -11,19 +11,23 @@ import { formatCurrency } from '@/shared/utils/format-currency';
 export function AssetsTab() {
   const router = useRouter();
   const { assets, categories, transactions, isLoadingData } = useData();
-  const { currencyMode, globalUsd } = useUI();
+  const { currencyMode, usdRate } = useUI();
 
   const groupedAssets = useMemo(() => {
     const map = new Map<
       string,
-      Category & { id: string; assets: Asset[] }
+      Category & { assets: Asset[] }
     >();
-    categories.forEach((c) => map.set(c.id, { ...c, assets: [] }));
+    categories
+      .filter((c) => c.kind === 'asset')
+      .forEach((c) => map.set(c.id, { ...c, assets: [] }));
     map.set('uncategorized', {
       id: 'uncategorized',
       user_id: '',
       name: 'بدون دسته‌بندی',
       color: '#64748b',
+      kind: 'asset',
+      parent_id: null,
       assets: [],
     });
 
@@ -75,7 +79,7 @@ export function AssetsTab() {
                   asset,
                   transactions,
                   currencyMode,
-                  globalUsd
+                  usdRate
                 );
                 const displayValue =
                   currencyMode === 'USD'

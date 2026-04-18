@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useUI } from '@/features/portfolio/PortfolioProvider';
 import { BottomNav } from '@/features/shell/components/BottomNav';
 
-const TAB_ROUTES = new Set<string>(['/', '/assets', '/settings']);
+const TAB_ROUTES = new Set<string>(['/', '/assets', '/wallets', '/settings']);
 
 export interface ShellProps {
   children: ReactNode;

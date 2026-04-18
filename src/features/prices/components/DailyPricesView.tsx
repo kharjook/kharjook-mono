@@ -5,17 +5,24 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { supabase } from '@/shared/lib/supabase/client';
-import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
+import type { CurrencyRate } from '@/shared/types/domain';
+import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
 
 export function DailyPricesView() {
   const router = useRouter();
-  const { assets, setAssets } = useData();
-  const { globalUsd, setGlobalUsd } = useUI();
+  const { user } = useAuth();
+  const { assets, setAssets, setCurrencyRates } = useData();
+  const { usdRate } = useUI();
 
   const [isSaving, setIsSaving] = useState(false);
   const [localPrices, setLocalPrices] = useState<LocalPrices>({});
+  // Local USD rate input. Seeded from the canonical rate; persisted to
+  // `currency_rates.USD` on save (single source of truth — no shadow state).
+  const [localUsd, setLocalUsd] = useState<string>(() =>
+    usdRate ? String(usdRate) : ''
+  );
 
   useEffect(() => {
     const p: LocalPrices = {};
@@ -27,6 +34,15 @@ export function DailyPricesView() {
     });
     setLocalPrices(p);
   }, [assets]);
+
+  // If the rate changes elsewhere while this view is mounted, re-seed.
+  useEffect(() => {
+    setLocalUsd(usdRate ? String(usdRate) : '');
+  }, [usdRate]);
+
+  const currentUsdNum = Number(localUsd);
+  const effectiveUsd =
+    Number.isFinite(currentUsdNum) && currentUsdNum > 0 ? currentUsdNum : 0;
 
   const handlePriceChange = (
     id: string,
@@ -45,27 +61,26 @@ export function DailyPricesView() {
           canonical !== '' &&
           canonical !== '.' &&
           !Number.isNaN(n) &&
-          globalUsd > 0
+          effectiveUsd > 0
         ) {
-          newUsd = String(n / globalUsd);
+          newUsd = String(n / effectiveUsd);
         }
       } else {
         newUsd = canonical;
         const n = Number(canonical);
         if (canonical !== '' && canonical !== '.' && !Number.isNaN(n)) {
-          newToman = String(n * globalUsd);
+          newToman = String(n * effectiveUsd);
         }
       }
       return { ...prev, [id]: { toman: newToman, usd: newUsd } };
     });
   };
 
-  const handleGlobalUsdCanonical = (canonical: string) => {
+  const handleUsdRateChange = (canonical: string) => {
+    setLocalUsd(canonical);
     const newUsd =
       canonical === '' || canonical === '.' ? 0 : Number(canonical);
     if (canonical !== '' && canonical !== '.' && Number.isNaN(newUsd)) return;
-
-    setGlobalUsd(newUsd);
 
     setLocalPrices((prev) => {
       const next: LocalPrices = { ...prev };
@@ -81,9 +96,10 @@ export function DailyPricesView() {
   };
 
   const handleSavePrices = async () => {
+    if (!user) return;
     setIsSaving(true);
     try {
-      const updates = assets.map((a) => ({
+      const assetUpdates = assets.map((a) => ({
         id: a.id,
         user_id: a.user_id,
         category_id: a.category_id,
@@ -93,10 +109,45 @@ export function DailyPricesView() {
         price_usd: Number(localPrices[a.id]?.usd || 0),
       }));
 
-      const { data, error } = await supabase.from('assets').upsert(updates).select();
-      if (error) throw error;
+      // Persist USD rate alongside asset prices so they can never drift apart.
+      const usdNum = Number(localUsd);
+      const persistUsd =
+        Number.isFinite(usdNum) && usdNum > 0 && usdNum !== usdRate;
 
-      setAssets(data);
+      const assetPromise = supabase.from('assets').upsert(assetUpdates).select();
+      const ratePromise = persistUsd
+        ? supabase
+            .from('currency_rates')
+            .upsert(
+              [
+                {
+                  user_id: user.id,
+                  currency: 'USD',
+                  toman_per_unit: usdNum,
+                  updated_at: new Date().toISOString(),
+                },
+              ],
+              { onConflict: 'user_id,currency' }
+            )
+            .select()
+        : null;
+
+      const [assetRes, rateRes] = await Promise.all([assetPromise, ratePromise]);
+
+      if (assetRes.error) throw assetRes.error;
+      if (rateRes?.error) throw rateRes.error;
+
+      setAssets((assetRes.data as typeof assets) || []);
+
+      if (rateRes) {
+        const fresh = (rateRes.data as CurrencyRate[]) || [];
+        setCurrencyRates((prev) => {
+          const map = new Map(prev.map((r) => [r.currency, r]));
+          fresh.forEach((r) => map.set(r.currency, r));
+          return Array.from(map.values());
+        });
+      }
+
       router.back();
     } catch (error) {
       alert('خطا در ذخیره قیمت‌ها');
@@ -124,11 +175,14 @@ export function DailyPricesView() {
             قیمت جهانی دلار (تومان)
           </label>
           <FormattedNumberInput
-            value={globalUsd ? String(globalUsd) : ''}
-            onValueChange={handleGlobalUsdCanonical}
+            value={localUsd}
+            onValueChange={handleUsdRateChange}
             className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-left font-mono focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
             dir="ltr"
           />
+          <p className="text-[11px] text-purple-300/60 mt-2">
+            این مقدار همان نرخ USD در «نرخ تبدیل ارزها» است و در هر دو جا یکی نگه‌داشته می‌شود.
+          </p>
         </div>
 
         <div className="space-y-4">
@@ -180,7 +234,7 @@ export function DailyPricesView() {
       <button
         onClick={handleSavePrices}
         disabled={isSaving}
-        className="fixed bottom-6 right-1/2 translate-x-1/2 w-[calc(100%-3rem)] max-w-[calc(28rem-3rem)] bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-2xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.4)] transition-all flex justify-center items-center gap-2 z-30 disabled:opacity-50"
+        className="fixed bottom-6 right-1/2 translate-x-1/2 w-[calc(100%-3rem)] max-w-100 bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-2xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.4)] transition-all flex justify-center items-center gap-2 z-30 disabled:opacity-50"
       >
         {isSaving ? (
           <RefreshCw className="animate-spin" size={20} />

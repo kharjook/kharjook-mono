@@ -4,15 +4,28 @@ import { useMemo } from 'react';
 import { RefreshCw, TrendingDown, TrendingUp } from 'lucide-react';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
+import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
+import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { formatCurrency } from '@/shared/utils/format-currency';
 
+const CASH_SLICE_COLOR = '#94a3b8'; // slate-400
+const CASH_SLICE_NAME = 'نقد';
+
 export function HomeTab() {
-  const { assets, categories, transactions, isLoadingData, refresh } = useData();
-  const { currencyMode, globalUsd } = useUI();
+  const {
+    assets,
+    categories,
+    transactions,
+    wallets,
+    currencyRates,
+    isLoadingData,
+    refresh,
+  } = useData();
+  const { currencyMode, usdRate } = useUI();
 
   const portfolioStats = useMemo(() => {
-    let totalValueToman = 0;
-    let totalValueUsd = 0;
+    let assetsValueToman = 0;
+    let assetsValueUsd = 0;
     let totalCostToman = 0;
 
     const categoryMap = new Map<
@@ -25,10 +38,10 @@ export function HomeTab() {
         asset,
         transactions,
         currencyMode,
-        globalUsd
+        usdRate
       );
-      totalValueToman += stats.currentValueToman;
-      totalValueUsd += stats.currentValueUsd;
+      assetsValueToman += stats.currentValueToman;
+      assetsValueUsd += stats.currentValueUsd;
       totalCostToman += stats.totalCostToman;
 
       if (stats.currentValueToman > 0 && asset.category_id) {
@@ -36,8 +49,9 @@ export function HomeTab() {
         const catName = cat ? cat.name : 'بدون دسته';
         const catColor = cat ? cat.color : '#64748b';
 
-        if (categoryMap.has(asset.category_id)) {
-          categoryMap.get(asset.category_id)!.value += stats.currentValueToman;
+        const existing = categoryMap.get(asset.category_id);
+        if (existing) {
+          existing.value += stats.currentValueToman;
         } else {
           categoryMap.set(asset.category_id, {
             name: catName,
@@ -48,7 +62,27 @@ export function HomeTab() {
       }
     });
 
-    const totalProfitToman = totalValueToman - totalCostToman;
+    // Aggregate every wallet into a single "نقد" cash slice (per user spec).
+    let cashValueToman = 0;
+    wallets.forEach((w) => {
+      const balance = calculateWalletStats(w, transactions).balance;
+      if (balance <= 0) return;
+      cashValueToman += balance * tomanPerUnit(w.currency, currencyRates);
+    });
+
+    if (cashValueToman > 0) {
+      categoryMap.set('__cash__', {
+        name: CASH_SLICE_NAME,
+        value: cashValueToman,
+        color: CASH_SLICE_COLOR,
+      });
+    }
+
+    const totalValueToman = assetsValueToman + cashValueToman;
+    const totalValueUsd =
+      usdRate > 0 ? totalValueToman / usdRate : assetsValueUsd;
+
+    const totalProfitToman = assetsValueToman - totalCostToman;
     const isProfit = totalProfitToman >= 0;
 
     const distributions = Array.from(categoryMap.values());
@@ -60,22 +94,25 @@ export function HomeTab() {
     return {
       totalValueToman,
       totalValueUsd,
-      totalCostToman,
+      cashValueToman,
       totalProfitToman,
       isProfit,
       distributions,
     };
-  }, [assets, categories, transactions, currencyMode, globalUsd]);
+  }, [assets, categories, transactions, wallets, currencyRates, currencyMode, usdRate]);
 
   const displayValue =
     currencyMode === 'USD'
       ? portfolioStats.totalValueUsd
       : portfolioStats.totalValueToman;
   const displayProfit =
-    currencyMode === 'USD'
-      ? portfolioStats.totalValueUsd -
-        portfolioStats.totalCostToman / globalUsd
+    currencyMode === 'USD' && usdRate > 0
+      ? portfolioStats.totalProfitToman / usdRate
       : portfolioStats.totalProfitToman;
+  const displayCash =
+    currencyMode === 'USD' && usdRate > 0
+      ? portfolioStats.cashValueToman / usdRate
+      : portfolioStats.cashValueToman;
 
   return (
     <div className="p-6 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -90,17 +127,23 @@ export function HomeTab() {
         </button>
       </div>
 
-      <div className="bg-gradient-to-br from-[#23253A] to-[#1A1B26] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border border-white/5 relative overflow-hidden">
+      <div className="bg-linear-to-br from-[#23253A] to-[#1A1B26] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.4)] border border-white/5 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
         <p className="text-slate-400 text-sm mb-2 relative z-10">
-          ارزش کل دارایی‌ها
+          ارزش کل سبد (دارایی + نقد)
         </p>
         <h2
-          className="text-4xl font-bold text-white mb-6 tracking-tight relative z-10"
+          className="text-4xl font-bold text-white mb-4 tracking-tight relative z-10"
           dir="ltr"
         >
           {formatCurrency(displayValue, currencyMode)}
         </h2>
+
+        {portfolioStats.cashValueToman > 0 && (
+          <p className="text-xs text-slate-500 mb-4 relative z-10" dir="ltr">
+            از این مقدار {formatCurrency(displayCash, currencyMode)} نقد است
+          </p>
+        )}
 
         <div className="flex items-center gap-3 relative z-10">
           <div
@@ -114,13 +157,13 @@ export function HomeTab() {
             )}
             <span>{formatCurrency(Math.abs(displayProfit), currencyMode)}</span>
           </div>
-          <span className="text-slate-500 text-xs">سود کل سبد</span>
+          <span className="text-slate-500 text-xs">سود/زیان دارایی‌ها</span>
         </div>
       </div>
 
       <div>
         <h3 className="text-lg font-semibold text-slate-200 mb-4">
-          پراکندگی سبد (دسته‌بندی)
+          پراکندگی سبد
         </h3>
         <div className="bg-[#1A1B26] p-5 rounded-3xl border border-white/5">
           {isLoadingData ? (

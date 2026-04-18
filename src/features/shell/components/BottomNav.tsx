@@ -6,12 +6,13 @@ import { Activity, Home, Plus, Settings, Wallet } from 'lucide-react';
 import { useData } from '@/features/portfolio/PortfolioProvider';
 import { NavItem } from '@/features/shell/components/NavItem';
 
-function useTabState(pathname: string) {
-  if (pathname === '/') return 'home' as const;
-  if (pathname === '/assets' || pathname.startsWith('/assets/')) {
-    return 'assets' as const;
-  }
-  if (pathname === '/settings') return 'settings' as const;
+type Tab = 'home' | 'assets' | 'wallets' | 'settings' | null;
+
+function useTabState(pathname: string): Tab {
+  if (pathname === '/') return 'home';
+  if (pathname === '/assets' || pathname.startsWith('/assets/')) return 'assets';
+  if (pathname === '/wallets' || pathname.startsWith('/wallets/')) return 'wallets';
+  if (pathname === '/settings') return 'settings';
   return null;
 }
 
@@ -32,7 +33,7 @@ export function BottomNav() {
           onClick={() => router.push('/')}
         />
         <NavItem
-          icon={<Wallet size={22} />}
+          icon={<Activity size={22} />}
           label="دارایی‌ها"
           isActive={active === 'assets'}
           onClick={() => router.push('/assets')}
@@ -41,7 +42,7 @@ export function BottomNav() {
 
       <div className="flex flex-col items-center justify-center -mt-6 z-10 px-2 pb-1">
         <Link
-          href="/shortcut/select-asset"
+          href="/transactions/new"
           aria-disabled={isLoadingData}
           tabIndex={isLoadingData ? -1 : undefined}
           className={`w-14 h-14 bg-purple-600 hover:bg-purple-500 rounded-full flex justify-center items-center text-white shadow-[0_4px_15px_rgba(147,51,234,0.5)] border-[5px] border-[#161722] transition-transform active:scale-95 ${
@@ -54,10 +55,10 @@ export function BottomNav() {
 
       <div className="flex justify-around flex-1 items-center pb-2">
         <NavItem
-          icon={<Activity size={22} />}
-          label="قیمت‌ها"
-          isActive={false}
-          onClick={() => router.push('/prices')}
+          icon={<Wallet size={22} />}
+          label="کیف پول‌ها"
+          isActive={active === 'wallets'}
+          onClick={() => router.push('/wallets')}
           disabled={isLoadingData}
         />
         <NavItem

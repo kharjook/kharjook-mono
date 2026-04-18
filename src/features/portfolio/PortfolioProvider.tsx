@@ -18,7 +18,9 @@ import type {
   AuthUser,
   Category,
   CurrencyMode,
+  CurrencyRate,
   Transaction,
+  Wallet,
 } from '@/shared/types/domain';
 
 interface AuthValue {
@@ -31,24 +33,36 @@ interface DataValue {
   categories: Category[];
   assets: Asset[];
   transactions: Transaction[];
+  wallets: Wallet[];
+  currencyRates: CurrencyRate[];
   isLoadingData: boolean;
   setCategories: Dispatch<SetStateAction<Category[]>>;
   setAssets: Dispatch<SetStateAction<Asset[]>>;
   setTransactions: Dispatch<SetStateAction<Transaction[]>>;
+  setWallets: Dispatch<SetStateAction<Wallet[]>>;
+  setCurrencyRates: Dispatch<SetStateAction<CurrencyRate[]>>;
   refresh: () => Promise<void>;
 }
 
 interface UIValue {
   currencyMode: CurrencyMode;
-  globalUsd: number;
+  /**
+   * Tomans per 1 USD — derived from `currency_rates.USD`. Falls back to a
+   * sane constant only so math (divisions, conversions) never blows up
+   * before the user has set a rate. Use `usdRateIsSet` to know whether
+   * the value is real or a placeholder.
+   */
+  usdRate: number;
+  usdRateIsSet: boolean;
   setCurrencyMode: Dispatch<SetStateAction<CurrencyMode>>;
-  setGlobalUsd: Dispatch<SetStateAction<number>>;
   toggleCurrency: () => void;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
 const DataContext = createContext<DataValue | null>(null);
 const UIContext = createContext<UIValue | null>(null);
+
+const FALLBACK_USD_RATE = 60000;
 
 export interface PortfolioProviderProps {
   initialUser: AuthUser | null;
@@ -65,10 +79,11 @@ export function PortfolioProvider({
   const [categories, setCategories] = useState<Category[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [currencyRates, setCurrencyRates] = useState<CurrencyRate[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
 
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>('TOMAN');
-  const [globalUsd, setGlobalUsd] = useState(60000);
 
   const fetchSeq = useRef(0);
 
@@ -77,7 +92,7 @@ export function PortfolioProvider({
     const seq = ++fetchSeq.current;
     setIsLoadingData(true);
     try {
-      const [catRes, astRes, txRes] = await Promise.all([
+      const [catRes, astRes, txRes, walRes, rateRes] = await Promise.all([
         supabase
           .from('categories')
           .select('*')
@@ -90,6 +105,12 @@ export function PortfolioProvider({
           .from('transactions')
           .select('*')
           .order('created_at', { ascending: false }),
+        supabase
+          .from('wallets')
+          .select('*')
+          .is('archived_at', null)
+          .order('created_at', { ascending: true }),
+        supabase.from('currency_rates').select('*'),
       ]);
 
       if (seq !== fetchSeq.current) return;
@@ -97,10 +118,14 @@ export function PortfolioProvider({
       if (catRes.error) throw catRes.error;
       if (astRes.error) throw astRes.error;
       if (txRes.error) throw txRes.error;
+      if (walRes.error) throw walRes.error;
+      if (rateRes.error) throw rateRes.error;
 
       setCategories((catRes.data as Category[]) || []);
       setAssets((astRes.data as Asset[]) || []);
       setTransactions((txRes.data as Transaction[]) || []);
+      setWallets((walRes.data as Wallet[]) || []);
+      setCurrencyRates((rateRes.data as CurrencyRate[]) || []);
     } catch (error) {
       if (seq !== fetchSeq.current) return;
       console.error('Error fetching data:', error);
@@ -128,6 +153,8 @@ export function PortfolioProvider({
       setCategories([]);
       setAssets([]);
       setTransactions([]);
+      setWallets([]);
+      setCurrencyRates([]);
     }
   }, [user, refresh]);
 
@@ -151,25 +178,39 @@ export function PortfolioProvider({
       categories,
       assets,
       transactions,
+      wallets,
+      currencyRates,
       isLoadingData,
       setCategories,
       setAssets,
       setTransactions,
+      setWallets,
+      setCurrencyRates,
       refresh,
     }),
-    [categories, assets, transactions, isLoadingData, refresh]
+    [
+      categories,
+      assets,
+      transactions,
+      wallets,
+      currencyRates,
+      isLoadingData,
+      refresh,
+    ]
   );
 
-  const uiValue = useMemo<UIValue>(
-    () => ({
+  const uiValue = useMemo<UIValue>(() => {
+    const stored = currencyRates.find((r) => r.currency === 'USD');
+    const storedNum = stored ? Number(stored.toman_per_unit) : 0;
+    const isSet = storedNum > 0;
+    return {
       currencyMode,
-      globalUsd,
+      usdRate: isSet ? storedNum : FALLBACK_USD_RATE,
+      usdRateIsSet: isSet,
       setCurrencyMode,
-      setGlobalUsd,
       toggleCurrency,
-    }),
-    [currencyMode, globalUsd, toggleCurrency]
-  );
+    };
+  }, [currencyMode, currencyRates, toggleCurrency]);
 
   return (
     <AuthContext.Provider value={authValue}>

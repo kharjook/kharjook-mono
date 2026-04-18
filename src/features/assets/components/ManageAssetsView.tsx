@@ -140,11 +140,13 @@ export function ManageAssetsView() {
               className="w-full bg-[#222436] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none transition-all appearance-none"
             >
               <option value="">بدون دسته</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              {categories
+                .filter((c) => c.kind === 'asset')
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">

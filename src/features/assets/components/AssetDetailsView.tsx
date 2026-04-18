@@ -16,7 +16,7 @@ export interface AssetDetailsViewProps {
 export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   const router = useRouter();
   const { assets, transactions, setTransactions } = useData();
-  const { currencyMode, globalUsd } = useUI();
+  const { currencyMode, usdRate } = useUI();
 
   const asset = assets.find((a) => a.id === assetId);
 
@@ -38,7 +38,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
 
-  const stats = calculateAssetStats(asset, transactions, currencyMode, globalUsd);
+  const stats = calculateAssetStats(asset, transactions, currencyMode, usdRate);
 
   const displayValue =
     currencyMode === 'USD' ? stats.currentValueUsd : stats.currentValueToman;
@@ -133,7 +133,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             label="میانگین خرید"
             value={formatCurrency(
               currencyMode === 'USD'
-                ? stats.avgBuyPriceToman / globalUsd
+                ? stats.avgBuyPriceToman / usdRate
                 : stats.avgBuyPriceToman,
               currencyMode
             )}
@@ -142,7 +142,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             label="ارزش خرید کل"
             value={formatCurrency(
               currencyMode === 'USD'
-                ? stats.totalCostToman / globalUsd
+                ? stats.totalCostToman / usdRate
                 : stats.totalCostToman,
               currencyMode
             )}
@@ -167,18 +167,12 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
                 className="bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex flex-col gap-3 relative overflow-hidden group"
               >
                 <div
-                  className={`absolute left-0 top-0 bottom-0 w-1 ${tx.type === 'BUY' || tx.type === 'DEPOSIT' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                  className={`absolute left-0 top-0 bottom-0 w-1 ${tx.type === 'BUY' ? 'bg-emerald-500' : 'bg-rose-500'}`}
                 ></div>
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="text-slate-200 font-medium text-sm">
-                      {tx.type === 'BUY'
-                        ? 'خرید'
-                        : tx.type === 'SELL'
-                          ? 'فروش'
-                          : tx.type === 'DEPOSIT'
-                            ? 'واریز'
-                            : 'برداشت'}
+                      {tx.type === 'BUY' ? 'خرید' : 'فروش'}
                     </span>
                     <p className="text-slate-500 text-xs mt-1">
                       {latinizeDigits(tx.date_string)}

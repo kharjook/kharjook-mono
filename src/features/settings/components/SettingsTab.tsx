@@ -3,10 +3,15 @@
 import { useRouter } from 'next/navigation';
 import {
   Activity,
+  BarChart3,
   ChevronLeft,
+  Coins,
+  FileText,
   LogOut,
   Tag,
+  TrendingUp,
   User as UserIcon,
+  Wallet as WalletIcon,
 } from 'lucide-react';
 import { useAuth } from '@/features/portfolio/PortfolioProvider';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
@@ -45,16 +50,14 @@ export function SettingsTab() {
 
       <div className="space-y-3">
         <button
-          onClick={() => router.push('/manage/categories')}
+          onClick={() => router.push('/manage/wallets')}
           className="w-full bg-[#1A1B26] hover:bg-[#222436] border border-white/5 p-4 rounded-2xl flex items-center justify-between text-right transition-colors"
         >
           <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-400">
-              <Tag size={20} />
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400">
+              <WalletIcon size={20} />
             </div>
-            <span className="font-medium text-slate-200">
-              مدیریت دسته‌بندی‌ها
-            </span>
+            <span className="font-medium text-slate-200">مدیریت کیف پول‌ها</span>
           </div>
           <ChevronLeft size={20} className="text-slate-600" />
         </button>
@@ -70,6 +73,64 @@ export function SettingsTab() {
             <span className="font-medium text-slate-200">مدیریت دارایی‌ها</span>
           </div>
           <ChevronLeft size={20} className="text-slate-600" />
+        </button>
+
+        <button
+          onClick={() => router.push('/manage/categories')}
+          className="w-full bg-[#1A1B26] hover:bg-[#222436] border border-white/5 p-4 rounded-2xl flex items-center justify-between text-right transition-colors"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-400">
+              <Tag size={20} />
+            </div>
+            <span className="font-medium text-slate-200">
+              مدیریت دسته‌بندی‌ها
+            </span>
+          </div>
+          <ChevronLeft size={20} className="text-slate-600" />
+        </button>
+
+        <button
+          onClick={() => router.push('/prices')}
+          className="w-full bg-[#1A1B26] hover:bg-[#222436] border border-white/5 p-4 rounded-2xl flex items-center justify-between text-right transition-colors"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400">
+              <TrendingUp size={20} />
+            </div>
+            <span className="font-medium text-slate-200">بروزرسانی قیمت‌ها</span>
+          </div>
+          <ChevronLeft size={20} className="text-slate-600" />
+        </button>
+
+        <button
+          onClick={() => router.push('/manage/rates')}
+          className="w-full bg-[#1A1B26] hover:bg-[#222436] border border-white/5 p-4 rounded-2xl flex items-center justify-between text-right transition-colors"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+              <Coins size={20} />
+            </div>
+            <span className="font-medium text-slate-200">نرخ تبدیل ارزها</span>
+          </div>
+          <ChevronLeft size={20} className="text-slate-600" />
+        </button>
+
+        <button
+          type="button"
+          disabled
+          className="w-full bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex items-center justify-between text-right opacity-60 cursor-not-allowed"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-slate-500/10 flex items-center justify-center text-slate-400">
+              <BarChart3 size={20} />
+            </div>
+            <div className="text-right">
+              <p className="font-medium text-slate-200">گزارش‌ها</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">به‌زودی</p>
+            </div>
+          </div>
+          <FileText size={16} className="text-slate-600" />
         </button>
 
         <button
