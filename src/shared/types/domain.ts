@@ -36,6 +36,13 @@ export interface Asset {
   price_toman: number;
   price_usd: number;
   icon_url: string | null;
+  /**
+   * Slug from `PRICE_SOURCES` catalog used to auto-fetch prices later.
+   * Nullable = user marks the asset manual-priced. Stored value is the slug
+   * string so the catalog can evolve without schema changes; unknown slugs
+   * must degrade to "manual" in UI.
+   */
+  price_source_id: string | null;
   created_at?: string;
 }
 

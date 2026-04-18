@@ -8,6 +8,10 @@ import type { Asset } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { IconPicker } from '@/shared/components/IconPicker';
+import {
+  PRICE_SOURCES,
+  findPriceSource,
+} from '@/features/prices/constants/price-sources';
 
 export function ManageAssetsView() {
   const router = useRouter();
@@ -20,6 +24,7 @@ export function ManageAssetsView() {
     unit: '',
     categoryId: '',
     iconUrl: null as string | null,
+    priceSourceId: '' as string,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -36,6 +41,7 @@ export function ManageAssetsView() {
         name: formData.name,
         unit: formData.unit,
         icon_url: formData.iconUrl,
+        price_source_id: formData.priceSourceId || null,
       };
 
       if (editingId) {
@@ -76,13 +82,20 @@ export function ManageAssetsView() {
       unit: asset.unit,
       categoryId: asset.category_id || '',
       iconUrl: asset.icon_url ?? null,
+      priceSourceId: asset.price_source_id ?? '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const resetForm = () => {
     setEditingId(null);
-    setFormData({ name: '', unit: '', categoryId: '', iconUrl: null });
+    setFormData({
+      name: '',
+      unit: '',
+      categoryId: '',
+      iconUrl: null,
+      priceSourceId: '',
+    });
   };
 
   const handleDelete = async (id: string) => {
@@ -193,6 +206,37 @@ export function ManageAssetsView() {
               />
             </div>
           </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-2">
+              منبع قیمت (اختیاری)
+            </label>
+            <select
+              value={formData.priceSourceId}
+              onChange={(e) =>
+                setFormData({ ...formData, priceSourceId: e.target.value })
+              }
+              className="w-full bg-[#222436] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none transition-all appearance-none"
+            >
+              <option value="">دستی (بدون منبع)</option>
+              {PRICE_SOURCES.filter((s) => !s.deprecated).map((s) => (
+                <option key={s.slug} value={s.slug}>
+                  {s.label}
+                </option>
+              ))}
+              {/* Preserve a legacy/unknown slug so editing an asset never
+                  silently drops its binding just because the catalog changed. */}
+              {formData.priceSourceId &&
+                !findPriceSource(formData.priceSourceId) && (
+                  <option value={formData.priceSourceId}>
+                    {formData.priceSourceId} (نامعتبر)
+                  </option>
+                )}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              در صورت انتخاب، قیمت از این منبع در صفحهٔ قیمت‌ها قابل به‌روزرسانی خواهد بود.
+            </p>
+          </div>
         </div>
 
         <button
@@ -215,27 +259,33 @@ export function ManageAssetsView() {
         {assets.map((asset) => {
           const cat = categories.find((c) => c.id === asset.category_id);
           const color = cat ? cat.color : '#64748b';
+          const source = findPriceSource(asset.price_source_id);
 
           return (
             <div
               key={asset.id}
               className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editingId === asset.id ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'}`}
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <EntityIcon
                   iconUrl={asset.icon_url}
                   fallback={<Activity size={18} />}
                   bgColor={`${color}20`}
                   color={color}
-                  className="w-10 h-10"
+                  className="w-10 h-10 shrink-0"
                 />
-                <div>
-                  <p className="text-slate-200 font-medium text-sm">
+                <div className="min-w-0">
+                  <p className="text-slate-200 font-medium text-sm truncate">
                     {asset.name}
                   </p>
-                  <p className="text-slate-500 text-xs mt-1">
+                  <p className="text-slate-500 text-xs mt-1 truncate">
                     {cat ? cat.name : 'بدون دسته'} • {asset.unit}
                   </p>
+                  {source && (
+                    <span className="inline-block mt-1.5 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/20 rounded-full px-2 py-0.5">
+                      {source.label}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-2">
