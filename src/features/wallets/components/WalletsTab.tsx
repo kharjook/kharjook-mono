@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, Plus, Wallet as WalletIcon } from 'lucide-react';
+import { EntityIcon } from '@/shared/components/EntityIcon';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
@@ -90,9 +91,13 @@ export function WalletsTab() {
                 className="w-full bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-[#222436] active:scale-[0.99] transition-all text-right"
               >
                 <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0">
-                    <WalletIcon size={22} />
-                  </div>
+                  <EntityIcon
+                    iconUrl={wallet.icon_url}
+                    fallback={<WalletIcon size={22} />}
+                    bgColor="rgba(168, 85, 247, 0.10)"
+                    color="#c084fc"
+                    className="w-12 h-12 shrink-0"
+                  />
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-200 truncate">
                       {wallet.name}

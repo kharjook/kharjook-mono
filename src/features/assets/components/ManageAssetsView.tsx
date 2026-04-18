@@ -6,6 +6,8 @@ import { Activity, ArrowRight, Edit3, Trash2, X } from 'lucide-react';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Asset } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
+import { EntityIcon } from '@/shared/components/EntityIcon';
+import { IconPicker } from '@/shared/components/IconPicker';
 
 export function ManageAssetsView() {
   const router = useRouter();
@@ -17,6 +19,7 @@ export function ManageAssetsView() {
     name: '',
     unit: '',
     categoryId: '',
+    iconUrl: null as string | null,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -32,6 +35,7 @@ export function ManageAssetsView() {
         category_id: formData.categoryId || null,
         name: formData.name,
         unit: formData.unit,
+        icon_url: formData.iconUrl,
       };
 
       if (editingId) {
@@ -71,13 +75,14 @@ export function ManageAssetsView() {
       name: asset.name,
       unit: asset.unit,
       categoryId: asset.category_id || '',
+      iconUrl: asset.icon_url ?? null,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const resetForm = () => {
     setEditingId(null);
-    setFormData({ name: '', unit: '', categoryId: '' });
+    setFormData({ name: '', unit: '', categoryId: '', iconUrl: null });
   };
 
   const handleDelete = async (id: string) => {
@@ -128,6 +133,15 @@ export function ManageAssetsView() {
         </div>
 
         <div className="space-y-4">
+          <IconPicker
+            value={formData.iconUrl}
+            onChange={(url) => setFormData({ ...formData, iconUrl: url })}
+            userId={user.id}
+            folder="assets"
+            fallback={<Activity size={22} className="text-slate-400" />}
+            label="آیکون (اختیاری)"
+          />
+
           <div>
             <label className="block text-xs text-slate-400 mb-2">
               دسته‌بندی (اختیاری)
@@ -208,12 +222,13 @@ export function ManageAssetsView() {
               className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editingId === asset.id ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'}`}
             >
               <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ backgroundColor: `${color}20`, color: color }}
-                >
-                  <Activity size={18} />
-                </div>
+                <EntityIcon
+                  iconUrl={asset.icon_url}
+                  fallback={<Activity size={18} />}
+                  bgColor={`${color}20`}
+                  color={color}
+                  className="w-10 h-10"
+                />
                 <div>
                   <p className="text-slate-200 font-medium text-sm">
                     {asset.name}

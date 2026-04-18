@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Archive, ArrowRight, Edit3, Wallet as WalletIcon, X } from 'lucide-react';
+import { EntityIcon } from '@/shared/components/EntityIcon';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
+import { IconPicker } from '@/shared/components/IconPicker';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Currency, Wallet } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -17,6 +19,7 @@ type FormState = {
   name: string;
   currency: Currency;
   initialBalance: string;
+  iconUrl: string | null;
 };
 
 const emptyForm: FormState = {
@@ -24,6 +27,7 @@ const emptyForm: FormState = {
   name: '',
   currency: 'IRT',
   initialBalance: '',
+  iconUrl: null,
 };
 
 export function ManageWalletsView() {
@@ -45,6 +49,7 @@ export function ManageWalletsView() {
       name: w.name,
       currency: w.currency,
       initialBalance: String(w.initial_balance ?? ''),
+      iconUrl: w.icon_url ?? null,
     });
   };
 
@@ -61,7 +66,7 @@ export function ManageWalletsView() {
         // silently alter the meaning of every transaction touching this wallet.
         const { data, error } = await supabase
           .from('wallets')
-          .update({ name, initial_balance: initial })
+          .update({ name, initial_balance: initial, icon_url: form.iconUrl })
           .eq('id', form.editingId)
           .select()
           .single();
@@ -78,6 +83,7 @@ export function ManageWalletsView() {
               name,
               currency: form.currency,
               initial_balance: initial,
+              icon_url: form.iconUrl,
             },
           ])
           .select()
@@ -151,6 +157,16 @@ export function ManageWalletsView() {
         </div>
 
         <div className="space-y-4">
+          <IconPicker
+            value={form.iconUrl}
+            onChange={(url) => setForm({ ...form, iconUrl: url })}
+            userId={user.id}
+            folder="wallets"
+            fallback={<WalletIcon size={22} className="text-purple-300" />}
+            bgColor="rgba(168, 85, 247, 0.12)"
+            label="آیکون (اختیاری)"
+          />
+
           <div>
             <label className="block text-xs text-slate-400 mb-1">نام</label>
             <input
@@ -240,9 +256,13 @@ export function ManageWalletsView() {
               className="bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex items-center justify-between"
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0">
-                  <WalletIcon size={18} />
-                </div>
+                <EntityIcon
+                  iconUrl={w.icon_url}
+                  fallback={<WalletIcon size={18} />}
+                  bgColor="rgba(168, 85, 247, 0.10)"
+                  color="#c084fc"
+                  className="w-10 h-10 shrink-0"
+                />
                 <div className="min-w-0">
                   <p className="text-slate-200 text-sm font-medium truncate">
                     {w.name}

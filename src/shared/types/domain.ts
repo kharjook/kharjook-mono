@@ -35,6 +35,7 @@ export interface Asset {
   unit: string;
   price_toman: number;
   price_usd: number;
+  icon_url: string | null;
   created_at?: string;
 }
 
@@ -44,6 +45,7 @@ export interface Wallet {
   name: string;
   currency: Currency;
   initial_balance: number;
+  icon_url: string | null;
   archived_at: string | null;
   created_at: string;
 }

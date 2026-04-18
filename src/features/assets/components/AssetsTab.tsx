@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity } from 'lucide-react';
+import { EntityIcon } from '@/shared/components/EntityIcon';
 import type { Asset, Category } from '@/shared/types/domain';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
@@ -98,15 +99,13 @@ export function AssetsTab() {
                     className="bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:bg-[#222436] transition-colors active:scale-[0.98]"
                   >
                     <div className="flex items-center gap-4">
-                      <div
-                        className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                        style={{
-                          backgroundColor: `${group.color}20`,
-                          color: group.color,
-                        }}
-                      >
-                        <Activity size={24} />
-                      </div>
+                      <EntityIcon
+                        iconUrl={asset.icon_url}
+                        fallback={<Activity size={24} />}
+                        bgColor={`${group.color}20`}
+                        color={group.color}
+                        className="w-12 h-12"
+                      />
                       <div>
                         <h3 className="font-semibold text-slate-200">
                           {asset.name}

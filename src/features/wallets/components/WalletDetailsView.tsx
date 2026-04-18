@@ -12,6 +12,7 @@ import {
   Trash2,
   Wallet as WalletIcon,
 } from 'lucide-react';
+import { EntityIcon } from '@/shared/components/EntityIcon';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Asset, Transaction, TransactionType, Wallet } from '@/shared/types/domain';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
@@ -101,7 +102,16 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
             <span>{meta.symbol} {wallet.currency}</span>
             <WalletIcon size={14} />
           </div>
-          <p className="text-slate-400 text-sm mb-2 mt-2">موجودی فعلی</p>
+          <div className="flex justify-center mt-2 mb-3">
+            <EntityIcon
+              iconUrl={wallet.icon_url}
+              fallback={<WalletIcon size={22} />}
+              bgColor="rgba(168, 85, 247, 0.12)"
+              color="#c084fc"
+              className="w-14 h-14"
+            />
+          </div>
+          <p className="text-slate-400 text-sm mb-2">موجودی فعلی</p>
           <p className="text-3xl font-bold text-white" dir="ltr">
             {meta.symbol}{' '}
             {stats.balance.toLocaleString('en-US', {

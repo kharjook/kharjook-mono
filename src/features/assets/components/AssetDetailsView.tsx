@@ -1,7 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Edit3, Plus, Trash2 } from 'lucide-react';
+import { Activity, ArrowRight, Edit3, Plus, Trash2 } from 'lucide-react';
+import { EntityIcon } from '@/shared/components/EntityIcon';
 import { supabase } from '@/shared/lib/supabase/client';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
@@ -83,6 +84,15 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
 
       <div className="p-6 space-y-6">
         <div className="text-center py-6 bg-gradient-to-b from-purple-500/10 to-transparent rounded-3xl border border-purple-500/20">
+          <div className="flex justify-center mb-3">
+            <EntityIcon
+              iconUrl={asset.icon_url}
+              fallback={<Activity size={22} />}
+              bgColor="rgba(168, 85, 247, 0.12)"
+              color="#c084fc"
+              className="w-14 h-14"
+            />
+          </div>
           <p className="text-slate-400 text-sm mb-2">ارزش فعلی کل</p>
           <h2 className="text-3xl font-bold text-white mb-2" dir="ltr">
             {formatCurrency(displayValue, currencyMode)}
