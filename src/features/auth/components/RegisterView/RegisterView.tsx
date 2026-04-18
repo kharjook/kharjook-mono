@@ -1,19 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { Lock, RefreshCw, User as UserIcon, Wallet } from 'lucide-react';
-import useLoginView from './useLoginView';
+import useRegisterView from './useRegisterView';
 
-export function LoginView() {
-	const {error,handleLogin,isSubmitting,password,
-		email,setPassword,setEmail
-	} = useLoginView()
-	const searchParams = useSearchParams();
-	// Set by RegisterView when email confirmation is required — harmless no-op
-	// when confirmation is off (redirect in that path never fires).
-	const justRegistered = searchParams.get('registered') === '1';
- 
+export function RegisterView() {
+  const {
+    error,
+    handleRegister,
+    isSubmitting,
+    email,
+    setEmail,
+    password,
+    setPassword,
+    confirmPassword,
+    setConfirmPassword,
+  } = useRegisterView();
+
   return (
     <div className="bg-[#0F1015] text-slate-200 min-h-screen font-sans flex items-center justify-center p-4 selection:bg-purple-500/30">
       <div className="w-full max-w-md bg-[#161722] p-8 rounded-3xl border border-white/5 shadow-2xl relative overflow-hidden animate-in fade-in zoom-in-95 duration-500">
@@ -27,14 +30,10 @@ export function LoginView() {
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
             سبدینو
           </h1>
+          <p className="text-slate-500 text-xs">ساخت حساب جدید</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4 relative z-10">
-          {justRegistered && !error && (
-            <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs p-3 rounded-xl text-center">
-              حساب با موفقیت ساخته شد. لطفاً وارد شو.
-            </div>
-          )}
+        <form onSubmit={handleRegister} className="space-y-4 relative z-10">
           {error && (
             <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3 rounded-xl text-center">
               {error}
@@ -55,6 +54,7 @@ export function LoginView() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all font-mono"
                 dir="ltr"
+                autoComplete="email"
                 required
               />
             </div>
@@ -74,6 +74,29 @@ export function LoginView() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all font-mono tracking-widest"
                 dir="ltr"
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1.5 ml-1">
+              تکرار رمز عبور
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+                <Lock size={18} />
+              </span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all font-mono tracking-widest"
+                dir="ltr"
+                autoComplete="new-password"
+                minLength={6}
                 required
               />
             </div>
@@ -87,17 +110,17 @@ export function LoginView() {
             {isSubmitting ? (
               <RefreshCw size={20} className="animate-spin" />
             ) : (
-              'ورود به حساب'
+              'ساخت حساب'
             )}
           </button>
 
           <p className="text-center text-xs text-slate-500 pt-2">
-            حساب نداری؟{' '}
+            حساب داری؟{' '}
             <Link
-              href="/register"
+              href="/login"
               className="text-purple-400 hover:text-purple-300 font-medium transition-colors"
             >
-              ثبت‌نام
+              ورود
             </Link>
           </p>
         </form>
