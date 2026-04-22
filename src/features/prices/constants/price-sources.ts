@@ -35,7 +35,7 @@ export const PRICE_SOURCES: readonly PriceSource[] = [
     slug: 'abantether.usdt',
     provider: 'abantether',
     label: 'تتر · آبان‌تتر',
-    updatesRate: 'USDT',
+    updatesRate: null,
   },
   {
     slug: 'abantether.btc',

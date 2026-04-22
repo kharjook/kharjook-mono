@@ -2,10 +2,10 @@ import type { User } from '@supabase/supabase-js';
 
 export type CurrencyMode = 'TOMAN' | 'USD';
 
-export const CURRENCIES = ['IRT', 'USD', 'USDT', 'TRY', 'EUR'] as const;
+export const CURRENCIES = ['IRT', 'USD', 'TRY', 'EUR'] as const;
 export type Currency = (typeof CURRENCIES)[number];
 
-export const RATE_CURRENCIES = ['USD', 'USDT', 'TRY', 'EUR'] as const;
+export const RATE_CURRENCIES = ['USD', 'TRY', 'EUR'] as const;
 export type RateCurrency = (typeof RATE_CURRENCIES)[number];
 
 export type TransactionType =

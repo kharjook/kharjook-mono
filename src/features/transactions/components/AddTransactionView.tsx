@@ -110,7 +110,7 @@ const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
  *    auto-capture today's USD rate silently for the USD snapshot.
  *  - For asset endpoints, `priceToman` is "Toman per unit of asset".
  *  - For non-IRT wallet endpoints, `priceToman` is "Toman per unit of
- *    that wallet's currency" (e.g. Toman per USDT). Equivalent to the
+ *    that wallet's currency" (e.g. Toman per USD). Equivalent to the
  *    current-rate entry but captured at the tx date.
  *
  * `autoCaptureUsdRate` is true for IRT wallets: we DO store
