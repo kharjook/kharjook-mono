@@ -105,7 +105,6 @@ export function PortfolioProvider({
 
   const toast = useToast();
   const fetchSeq = useRef(0);
-  const bootExternalSyncDone = useRef(false);
 
   const refreshInternal = useCallback(async (includeExternal: boolean) => {
     if (!user) return;
@@ -239,12 +238,8 @@ export function PortfolioProvider({
 
   useEffect(() => {
     if (user) {
-      if (!bootExternalSyncDone.current) {
-        bootExternalSyncDone.current = true;
-        void refreshAll();
-      }
+      void refresh();
     } else {
-      bootExternalSyncDone.current = false;
       setCategories([]);
       setAssets([]);
       setTransactions([]);
@@ -252,7 +247,7 @@ export function PortfolioProvider({
       setCurrencyRates([]);
       setDailyPrices([]);
     }
-  }, [user, refreshAll]);
+  }, [user, refresh]);
 
   const logout = useCallback(async () => {
     setIsLoadingAuth(true);

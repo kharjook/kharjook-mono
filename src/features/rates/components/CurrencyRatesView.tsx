@@ -9,11 +9,6 @@ import { supabase } from '@/shared/lib/supabase/client';
 import type { CurrencyRate, RateCurrency } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import {
-  fetchProviderQuotes,
-  mergeCurrencyRates,
-  persistCurrencyRate,
-} from '@/features/prices/utils/provider-refresh';
-import {
   CURRENCY_META,
   RATE_ORDER,
 } from '@/features/wallets/constants/currency-meta';
@@ -38,7 +33,6 @@ export function CurrencyRatesView() {
   const initial = useMemo(() => buildLocal(currencyRates), [currencyRates]);
   const [local, setLocal] = useState<LocalRates>(initial);
   const [isSaving, setIsSaving] = useState(false);
-  const [isRefreshingUsd, setIsRefreshingUsd] = useState(false);
 
   // If the underlying context refreshes (e.g. another tab) reset the form to it.
   useEffect(() => {
@@ -49,29 +43,6 @@ export function CurrencyRatesView() {
 
   const setOne = (c: RateCurrency, canonical: string) =>
     setLocal((prev) => ({ ...prev, [c]: canonical }));
-
-  const handleRefreshUsd = async () => {
-    setIsRefreshingUsd(true);
-    try {
-      const quotes = await fetchProviderQuotes(['tgju.usd']);
-      const quote = quotes.find((item) => item.slug === 'tgju.usd');
-      if (!quote || !(quote.priceToman > 0)) {
-        toast.error('قیمت دلار از TGJU دریافت نشد.');
-        return;
-      }
-
-      setOne('USD', String(quote.priceToman));
-
-      const fresh = await persistCurrencyRate(user.id, 'USD', quote.priceToman);
-      setCurrencyRates((prev) => mergeCurrencyRates(prev, fresh));
-      toast.success('نرخ دلار از TGJU بروزرسانی شد.');
-    } catch (error) {
-      console.error(error);
-      toast.error('بروزرسانی نرخ دلار از TGJU ناموفق بود.');
-    } finally {
-      setIsRefreshingUsd(false);
-    }
-  };
 
   const handleSave = async () => {
     // Validate: every entered value must be > 0. Empty values are allowed
@@ -134,17 +105,6 @@ export function CurrencyRatesView() {
           <ArrowRight size={20} />
         </button>
         <h2 className="text-lg font-bold text-white flex-1">نرخ تبدیل ارزها</h2>
-        <button
-          onClick={() => void handleRefreshUsd()}
-          disabled={isRefreshingUsd}
-          className="p-2 bg-white/5 rounded-full text-slate-300 hover:bg-white/10 disabled:opacity-50"
-          aria-label="refresh-usd-from-tgju"
-        >
-          <RefreshCw
-            size={18}
-            className={isRefreshingUsd ? 'animate-spin' : undefined}
-          />
-        </button>
       </div>
 
       <div className="px-6 pt-4">
@@ -152,9 +112,6 @@ export function CurrencyRatesView() {
           هر مقدار نشان می‌دهد یک واحد از ارز انتخابی چند تومان ارزش دارد. این
           نرخ‌ها به‌صورت خودکار در فرم‌های تراکنش پیش‌نهاد می‌شوند و در صورت نیاز
           می‌توانی آن‌ها را در همان لحظه تغییر دهی.
-        </p>
-        <p className="text-[11px] text-slate-500 leading-5 mt-2">
-          دکمه‌ی رفرش بالا، نرخ دلار آزاد را از TGJU می‌خواند و در `USD` ذخیره می‌کند.
         </p>
       </div>
 
