@@ -97,16 +97,17 @@ export function BottomSheet({
 
       {/* Sheet */}
       <div
-        className={`absolute inset-x-0 bottom-0 mx-auto max-w-md bg-[#13141C] rounded-t-3xl border-t border-white/10 shadow-2xl transition-transform duration-300 ease-out ${
+        className={`absolute inset-x-0 bottom-0 mx-auto w-full sm:max-w-md bg-[#13141C] rounded-t-3xl border-t border-white/10 shadow-2xl transition-transform duration-300 ease-out ${
           open ? 'translate-y-0' : 'translate-y-full'
         }`}
         style={{
           transform: open
             ? `translateY(${dragY}px)`
             : 'translateY(100%)',
-          maxHeight: '85vh',
+          maxHeight: '85dvh',
           display: 'flex',
           flexDirection: 'column',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
       >
         <div
