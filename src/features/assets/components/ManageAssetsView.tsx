@@ -1,13 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity, ArrowRight, Edit3, Trash2, X } from 'lucide-react';
+import {
+  Activity,
+  ArrowRight,
+  ChevronLeft,
+  Edit3,
+  Folder,
+  Link2,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Asset } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
+import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { IconPicker } from '@/shared/components/IconPicker';
+import {
+  ListSheetPicker,
+  type ListSheetPickerItem,
+} from '@/shared/components/ListSheetPicker';
 import { useToast } from '@/shared/components/Toast';
 import {
   PRICE_SOURCES,
@@ -29,6 +43,49 @@ export function ManageAssetsView() {
     priceSourceId: '' as string,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const [priceSourcePickerOpen, setPriceSourcePickerOpen] = useState(false);
+
+  const selectedCategory = useMemo(
+    () =>
+      formData.categoryId
+        ? categories.find((c) => c.id === formData.categoryId) ?? null
+        : null,
+    [categories, formData.categoryId]
+  );
+
+  const priceSourceItems = useMemo<ListSheetPickerItem[]>(() => {
+    const base: ListSheetPickerItem[] = PRICE_SOURCES.filter(
+      (s) => !s.deprecated
+    ).map((s) => ({
+      id: s.slug,
+      label: s.label,
+      sublabel: s.slug,
+      leading: <Link2 size={14} />,
+    }));
+
+    // Preserve the currently-bound slug even if it's no longer in the catalog,
+    // so editing never silently drops the binding when a source is removed.
+    if (
+      formData.priceSourceId &&
+      !findPriceSource(formData.priceSourceId)
+    ) {
+      base.push({
+        id: formData.priceSourceId,
+        label: formData.priceSourceId,
+        sublabel: 'نامعتبر — ممکن است از کاتالوگ حذف شده باشد',
+        leading: <Link2 size={14} />,
+      });
+    }
+    return base;
+  }, [formData.priceSourceId]);
+
+  const selectedPriceSource = findPriceSource(formData.priceSourceId);
+  const selectedPriceSourceLabel = selectedPriceSource
+    ? selectedPriceSource.label
+    : formData.priceSourceId
+      ? `${formData.priceSourceId} (نامعتبر)`
+      : null;
 
   if (!user) return null;
 
@@ -161,22 +218,31 @@ export function ManageAssetsView() {
             <label className="block text-xs text-slate-400 mb-2">
               دسته‌بندی (اختیاری)
             </label>
-            <select
-              value={formData.categoryId}
-              onChange={(e) =>
-                setFormData({ ...formData, categoryId: e.target.value })
-              }
-              className="w-full bg-[#222436] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none transition-all appearance-none"
+            <button
+              type="button"
+              onClick={() => setCategoryPickerOpen(true)}
+              className="w-full flex items-center gap-3 bg-[#222436] border border-white/5 rounded-xl p-3 text-right hover:bg-[#2a2c40] transition-colors"
             >
-              <option value="">بدون دسته</option>
-              {categories
-                .filter((c) => c.kind === 'asset')
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
+              {selectedCategory ? (
+                <>
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: selectedCategory.color }}
+                  />
+                  <span className="flex-1 min-w-0 text-sm text-white truncate">
+                    {selectedCategory.name}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Folder size={14} className="text-slate-500 shrink-0" />
+                  <span className="flex-1 min-w-0 text-sm text-slate-500">
+                    بدون دسته
+                  </span>
+                </>
+              )}
+              <ChevronLeft size={16} className="text-slate-500 shrink-0" />
+            </button>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -213,28 +279,35 @@ export function ManageAssetsView() {
             <label className="block text-xs text-slate-400 mb-2">
               منبع قیمت (اختیاری)
             </label>
-            <select
-              value={formData.priceSourceId}
-              onChange={(e) =>
-                setFormData({ ...formData, priceSourceId: e.target.value })
-              }
-              className="w-full bg-[#222436] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none transition-all appearance-none"
+            <button
+              type="button"
+              onClick={() => setPriceSourcePickerOpen(true)}
+              className="w-full flex items-center gap-3 bg-[#222436] border border-white/5 rounded-xl p-3 text-right hover:bg-[#2a2c40] transition-colors"
             >
-              <option value="">دستی (بدون منبع)</option>
-              {PRICE_SOURCES.filter((s) => !s.deprecated).map((s) => (
-                <option key={s.slug} value={s.slug}>
-                  {s.label}
-                </option>
-              ))}
-              {/* Preserve a legacy/unknown slug so editing an asset never
-                  silently drops its binding just because the catalog changed. */}
-              {formData.priceSourceId &&
-                !findPriceSource(formData.priceSourceId) && (
-                  <option value={formData.priceSourceId}>
-                    {formData.priceSourceId} (نامعتبر)
-                  </option>
-                )}
-            </select>
+              {selectedPriceSourceLabel ? (
+                <>
+                  <Link2
+                    size={14}
+                    className={`shrink-0 ${
+                      selectedPriceSource
+                        ? 'text-purple-300'
+                        : 'text-amber-400'
+                    }`}
+                  />
+                  <span className="flex-1 min-w-0 text-sm text-white truncate">
+                    {selectedPriceSourceLabel}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Link2 size={14} className="text-slate-500 shrink-0" />
+                  <span className="flex-1 min-w-0 text-sm text-slate-500">
+                    دستی (بدون منبع)
+                  </span>
+                </>
+              )}
+              <ChevronLeft size={16} className="text-slate-500 shrink-0" />
+            </button>
             <p className="text-[11px] text-slate-500 mt-1">
               در صورت انتخاب، قیمت از این منبع در صفحهٔ قیمت‌ها قابل به‌روزرسانی خواهد بود.
             </p>
@@ -313,6 +386,35 @@ export function ManageAssetsView() {
           </p>
         )}
       </div>
+
+      <CategorySheetPicker
+        open={categoryPickerOpen}
+        onClose={() => setCategoryPickerOpen(false)}
+        title="انتخاب دسته‌بندی دارایی"
+        kind="asset"
+        categories={categories}
+        value={formData.categoryId || null}
+        onSelect={(id) =>
+          setFormData({ ...formData, categoryId: id ?? '' })
+        }
+        allowNone
+        noneLabel="بدون دسته"
+      />
+
+      <ListSheetPicker
+        open={priceSourcePickerOpen}
+        onClose={() => setPriceSourcePickerOpen(false)}
+        title="انتخاب منبع قیمت"
+        items={priceSourceItems}
+        value={formData.priceSourceId || null}
+        onSelect={(id) =>
+          setFormData({ ...formData, priceSourceId: id ?? '' })
+        }
+        allowNone
+        noneLabel="دستی (بدون منبع)"
+        noneLeading={<Link2 size={14} />}
+        emptyLabel="منبع قیمتی پیکربندی نشده."
+      />
     </div>
   );
 }

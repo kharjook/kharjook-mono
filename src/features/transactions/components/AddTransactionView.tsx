@@ -51,7 +51,7 @@ import {
   EndpointSheetPicker,
   type EndpointKind,
 } from '@/features/transactions/components/EndpointSheetPicker';
-import { CategorySheetPicker } from '@/features/transactions/components/CategorySheetPicker';
+import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

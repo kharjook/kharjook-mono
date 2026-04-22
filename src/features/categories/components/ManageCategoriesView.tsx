@@ -2,8 +2,17 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Check, ChevronDown, Edit3, Trash2, X } from 'lucide-react';
+import {
+  ArrowRight,
+  Check,
+  ChevronLeft,
+  Edit3,
+  Folder,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { supabase } from '@/shared/lib/supabase/client';
+import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
 import { useToast } from '@/shared/components/Toast';
 import type { Category, CategoryKind } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -44,6 +53,7 @@ export function ManageCategoriesView() {
   const [activeKind, setActiveKind] = useState<CategoryKind>('asset');
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
 
   // Categories scoped to the current tab.
   const scoped = useMemo(
@@ -91,26 +101,22 @@ export function ManageCategoriesView() {
     return acc;
   }, [form.editingId, childrenByParent]);
 
-  // Flatten the tree for the parent <select>, with indented labels so the user
-  // can see exactly where a new category will be nested.
-  const parentOptions = useMemo(() => {
-    if (activeKind === 'asset') return [];
-    const out: { id: string; label: string }[] = [];
-    const walk = (nodes: Category[], depth: number) => {
-      for (const n of nodes) {
-        if (n.id !== form.editingId && !descendantsOfEditing.has(n.id)) {
-          out.push({
-            id: n.id,
-            label: `${'— '.repeat(depth)}${n.name}`,
-          });
-        }
-        const kids = childrenByParent.get(n.id);
-        if (kids && kids.length) walk(kids, depth + 1);
-      }
-    };
-    walk(roots, 0);
-    return out;
-  }, [activeKind, roots, childrenByParent, form.editingId, descendantsOfEditing]);
+  // Ids the parent picker must hide: the category being edited plus its entire
+  // descendant subtree. Prevents re-parenting into a cycle.
+  const parentExcludeIds = useMemo<ReadonlySet<string>>(() => {
+    if (!form.editingId) return descendantsOfEditing;
+    const s = new Set(descendantsOfEditing);
+    s.add(form.editingId);
+    return s;
+  }, [descendantsOfEditing, form.editingId]);
+
+  const selectedParent = useMemo(
+    () =>
+      form.parentId
+        ? categories.find((c) => c.id === form.parentId) ?? null
+        : null,
+    [categories, form.parentId]
+  );
 
   if (!user) return null;
 
@@ -304,29 +310,34 @@ export function ManageCategoriesView() {
               <label className="block text-xs text-slate-400 mb-1">
                 زیرمجموعه‌ی (اختیاری)
               </label>
-              <div className="relative">
-                <select
-                  value={form.parentId ?? ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      parentId: e.target.value ? e.target.value : null,
-                    })
-                  }
-                  className="w-full appearance-none bg-[#222436] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-500 pr-10"
-                >
-                  <option value="">— بدون والد (دسته اصلی) —</option>
-                  {parentOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
+              <button
+                type="button"
+                onClick={() => setParentPickerOpen(true)}
+                className="w-full flex items-center gap-3 bg-[#222436] border border-white/10 rounded-xl p-3 text-right hover:bg-[#2a2c40] transition-colors"
+              >
+                {selectedParent ? (
+                  <>
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: selectedParent.color }}
+                    />
+                    <span className="flex-1 min-w-0 text-sm text-white truncate">
+                      {selectedParent.name}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Folder size={14} className="text-slate-500 shrink-0" />
+                    <span className="flex-1 min-w-0 text-sm text-slate-500">
+                      بدون والد (دسته اصلی)
+                    </span>
+                  </>
+                )}
+                <ChevronLeft
                   size={16}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
+                  className="text-slate-500 shrink-0"
                 />
-              </div>
+              </button>
             </div>
           )}
 
@@ -361,6 +372,21 @@ export function ManageCategoriesView() {
           />
         ))}
       </div>
+
+      {activeKind !== 'asset' && (
+        <CategorySheetPicker
+          open={parentPickerOpen}
+          onClose={() => setParentPickerOpen(false)}
+          title="انتخاب دستهٔ والد"
+          kind={activeKind}
+          categories={categories}
+          value={form.parentId}
+          onSelect={(id) => setForm({ ...form, parentId: id })}
+          allowNone
+          noneLabel="بدون والد (دسته اصلی)"
+          excludeIds={parentExcludeIds}
+        />
+      )}
     </div>
   );
 }
