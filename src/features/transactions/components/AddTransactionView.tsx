@@ -103,11 +103,11 @@ const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
  * `priceToman` / `usdRate` and what label to show.
  *
  * Rule:
- *  - BUY/SELL always need both (the existing trade form).
+ *  - BUY/SELL always need both `priceToman` and editable `usdRate`.
  *  - TRANSFER never needs pricing (portfolio-neutral).
  *  - INCOME/EXPENSE need pricing WHENEVER the endpoint is not an IRT
  *    wallet. For IRT wallets, the amount is already in Toman and we
- *    auto-capture today's USD rate silently for the USD snapshot.
+ *    use the current app USD rate as the default, but the user can edit it.
  *  - For asset endpoints, `priceToman` is "Toman per unit of asset".
  *  - For non-IRT wallet endpoints, `priceToman` is "Toman per unit of
  *    that wallet's currency" (e.g. Toman per USD). Equivalent to the
@@ -138,8 +138,8 @@ function pricingContextOf(form: FormState, wallets: Wallet[]): PricingContext {
     };
   }
   if (form.type === 'BUY' || form.type === 'SELL') {
-    // BUY/SELL: priceToman is always the asset price; usdRate is shown
-    // when the wallet-side is USD (existing behavior).
+    // BUY/SELL always expose both asset price and USD rate. The wallet side
+    // is optional, but the per-tx USD rate is still captured for auditability.
     const wallet = form.type === 'BUY'
       ? walletFromForm(form, 'source', wallets)
       : walletFromForm(form, 'target', wallets);
@@ -397,7 +397,11 @@ function recomputeMoneySide(
   const wallet = next.type === 'BUY'
     ? walletFromForm(next, 'source', wallets)
     : walletFromForm(next, 'target', wallets);
-  if (!wallet) return next;
+  if (!wallet) {
+    return next.type === 'BUY'
+      ? { ...next, sourceAmount: '' }
+      : { ...next, targetAmount: '' };
+  }
 
   const price = Number(next.priceToman);
   if (!Number.isFinite(price) || price <= 0) return next;
@@ -461,12 +465,12 @@ function validateForm(form: FormState, wallets: Wallet[]): string | null {
 
   switch (form.type) {
     case 'BUY':
-      if (form.sourceKind !== 'wallet' || !form.sourceId) return 'کیف پول مبدأ را انتخاب کن.';
       if (form.targetKind !== 'asset'  || !form.targetId) return 'دارایی مقصد را انتخاب کن.';
+      if (form.sourceKind && form.sourceKind !== 'wallet') return 'مبدأ خرید فقط می‌تواند کیف پول باشد.';
       break;
     case 'SELL':
       if (form.sourceKind !== 'asset'  || !form.sourceId) return 'دارایی مبدأ را انتخاب کن.';
-      if (form.targetKind !== 'wallet' || !form.targetId) return 'کیف پول مقصد را انتخاب کن.';
+      if (form.targetKind && form.targetKind !== 'wallet') return 'مقصد فروش فقط می‌تواند کیف پول باشد.';
       break;
     case 'TRANSFER':
       if (!form.sourceKind || !form.sourceId) return 'مبدأ را انتخاب کن.';
@@ -486,8 +490,16 @@ function validateForm(form: FormState, wallets: Wallet[]): string | null {
       break;
   }
 
-  const needsSrc = form.type !== 'INCOME';
-  const needsTgt = form.type !== 'EXPENSE';
+  const needsSrc =
+    form.type === 'SELL' ||
+    form.type === 'EXPENSE' ||
+    form.type === 'TRANSFER' ||
+    (form.type === 'BUY' && form.sourceKind === 'wallet' && !!form.sourceId);
+  const needsTgt =
+    form.type === 'BUY' ||
+    form.type === 'INCOME' ||
+    form.type === 'TRANSFER' ||
+    (form.type === 'SELL' && form.targetKind === 'wallet' && !!form.targetId);
   if (needsSrc) {
     const v = Number(form.sourceAmount);
     if (!Number.isFinite(v) || v <= 0) return 'مقدار مبدأ نامعتبر است.';
@@ -627,12 +639,14 @@ function buildPayload(
   const setSource = () => {
     if (form.sourceKind === 'wallet') base.source_wallet_id = form.sourceId;
     else if (form.sourceKind === 'asset') base.source_asset_id = form.sourceId;
-    base.source_amount = Number(form.sourceAmount);
+    const amount = Number(form.sourceAmount);
+    if (Number.isFinite(amount) && amount > 0) base.source_amount = amount;
   };
   const setTarget = () => {
     if (form.targetKind === 'wallet') base.target_wallet_id = form.targetId;
     else if (form.targetKind === 'asset') base.target_asset_id = form.targetId;
-    base.target_amount = Number(form.targetAmount);
+    const amount = Number(form.targetAmount);
+    if (Number.isFinite(amount) && amount > 0) base.target_amount = amount;
   };
 
   switch (form.type) {
@@ -1218,6 +1232,8 @@ function TransactionFormRow({
     jalaali && jalaali.jy === yesterday.jy && jalaali.jm === yesterday.jm && jalaali.jd === yesterday.jd;
 
   const primarySide = PRIMARY_SIDE[form.type];
+  const optionalSource = form.type === 'BUY';
+  const optionalTarget = form.type === 'SELL';
   const canShowQuickChips =
     primarySide === 'source' &&
     form.sourceKind !== null &&
@@ -1244,6 +1260,14 @@ function TransactionFormRow({
   }
 
   // Expanded view ---------------------------------------------------------
+
+  const clearOptionalSource = () => {
+    onChange((prev) => ({ ...prev, sourceKind: null, sourceId: null, sourceAmount: '' }));
+  };
+
+  const clearOptionalTarget = () => {
+    onChange((prev) => ({ ...prev, targetKind: null, targetId: null, targetAmount: '' }));
+  };
 
   return (
     <>
@@ -1288,8 +1312,21 @@ function TransactionFormRow({
               asset={sourceAsset}
               balance={srcBalance}
               insufficient={isInsufficient}
+              optional={optionalSource}
               onTap={() => setPickerOpen('source')}
             />
+          )}
+
+          {optionalSource && (form.sourceKind || form.sourceId) && (
+            <div className="-mt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={clearOptionalSource}
+                className="text-[11px] text-slate-500 hover:text-white transition"
+              >
+                بدون ثبت مبدأ
+              </button>
+            </div>
           )}
 
           {shape.source && shape.target && (
@@ -1312,8 +1349,21 @@ function TransactionFormRow({
                   : null
               }
               insufficient={false}
+              optional={optionalTarget}
               onTap={() => setPickerOpen('target')}
             />
+          )}
+
+          {optionalTarget && (form.targetKind || form.targetId) && (
+            <div className="-mt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={clearOptionalTarget}
+                className="text-[11px] text-slate-500 hover:text-white transition"
+              >
+                بدون ثبت مقصد
+              </button>
+            </div>
           )}
         </div>
 
@@ -1380,19 +1430,12 @@ function TransactionFormRow({
             usdRate={form.usdRate}
             onPriceToman={(v) => updateField('priceToman', v)}
             onUsdRate={(v) => updateField('usdRate', v)}
-            /* Existing BUY/SELL rule kept: USD-wallet trades prompt for the
-               per-tx USD rate. Non-IRT INCOME/EXPENSE always prompt. The
-               IRT BUY/SELL case still uses today's rate silently. */
-            showUsdRate={
-              (form.type === 'BUY' && sourceWallet?.currency === 'USD') ||
-              (form.type === 'SELL' && targetWallet?.currency === 'USD') ||
-              ((form.type === 'INCOME' || form.type === 'EXPENSE') && pricing.needsUsdRate)
-            }
+            showUsdRate={pricing.needsUsdRate}
           />
         )}
 
         {/* Derived (auto-computed) amount — read-only */}
-        {(form.type === 'BUY' || form.type === 'SELL') && (
+        {((form.type === 'BUY' && sourceWallet) || (form.type === 'SELL' && targetWallet)) && (
           <DerivedAmountLine
             form={form}
             sourceWallet={sourceWallet}
@@ -1503,6 +1546,7 @@ function DirectionCard({
   asset,
   balance,
   insufficient,
+  optional = false,
   onTap,
 }: {
   label: string;
@@ -1511,6 +1555,7 @@ function DirectionCard({
   asset?: Asset;
   balance: number | null;
   insufficient: boolean;
+  optional?: boolean;
   onTap: () => void;
 }) {
   const filled = !!(wallet || asset);
@@ -1537,7 +1582,10 @@ function DirectionCard({
         className="w-10 h-10 shrink-0"
       />
       <div className="flex-1 min-w-0">
-        <p className="text-[10px] text-slate-500 uppercase tracking-widest">{label}</p>
+        <p className="text-[10px] text-slate-500 uppercase tracking-widest">
+          {label}
+          {optional ? ' · اختیاری' : ''}
+        </p>
         <p className={`text-sm font-semibold truncate ${filled ? 'text-slate-100' : 'text-slate-500'}`}>
           {name}
         </p>
