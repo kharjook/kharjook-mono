@@ -19,7 +19,7 @@ export function HomeTab() {
     wallets,
     currencyRates,
     isLoadingData,
-    refresh,
+    refreshAll,
   } = useData();
   const { currencyMode, usdRate } = useUI();
 
@@ -119,7 +119,7 @@ export function HomeTab() {
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-white">داشبورد</h2>
         <button
-          onClick={refresh}
+          onClick={refreshAll}
           disabled={isLoadingData}
           className="text-slate-400 hover:text-white p-2"
         >

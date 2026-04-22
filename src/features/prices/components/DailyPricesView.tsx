@@ -9,6 +9,7 @@ import { supabase } from '@/shared/lib/supabase/client';
 import type { CurrencyRate, DailyPrice } from '@/shared/types/domain';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
+import { fetchProviderQuotes } from '@/features/prices/utils/provider-refresh';
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
 
@@ -20,6 +21,7 @@ export function DailyPricesView() {
   const { usdRate } = useUI();
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [localPrices, setLocalPrices] = useState<LocalPrices>({});
   // Local USD rate input. Seeded from the canonical rate; persisted to
   // `currency_rates.USD` on save (single source of truth — no shadow state).
@@ -46,6 +48,68 @@ export function DailyPricesView() {
   const currentUsdNum = Number(localUsd);
   const effectiveUsd =
     Number.isFinite(currentUsdNum) && currentUsdNum > 0 ? currentUsdNum : 0;
+
+  const refreshableAssets = assets.filter((asset) => !!asset.price_source_id);
+
+  const applyProviderQuotes = async () => {
+    const slugs = [
+      'tgju.usd',
+      ...refreshableAssets
+        .map((asset) => asset.price_source_id)
+        .filter((slug): slug is string => !!slug),
+    ];
+
+    const quotes = await fetchProviderQuotes(slugs);
+    if (quotes.length === 0) return 0;
+
+    const quoteBySlug = new Map(quotes.map((quote) => [quote.slug, quote]));
+    const usdQuote = quoteBySlug.get('tgju.usd');
+    const nextUsdRate =
+      usdQuote && usdQuote.priceToman > 0 ? usdQuote.priceToman : effectiveUsd;
+
+    if (usdQuote && usdQuote.priceToman > 0) {
+      setLocalUsd(String(usdQuote.priceToman));
+    }
+
+    setLocalPrices((prev) => {
+      const next = { ...prev };
+      for (const asset of refreshableAssets) {
+        const slug = asset.price_source_id;
+        if (!slug) continue;
+        const quote = quoteBySlug.get(slug);
+        if (!quote) continue;
+        next[asset.id] = {
+          toman: String(quote.priceToman),
+          usd:
+            nextUsdRate > 0
+              ? String(quote.priceToman / nextUsdRate)
+              : (next[asset.id]?.usd ?? ''),
+        };
+      }
+      return next;
+    });
+
+    return quotes.filter((quote) => quote.slug !== 'tgju.usd').length;
+  };
+
+  const handleRefreshProviders = async (silent = false) => {
+    setIsRefreshingProviders(true);
+    try {
+      const updated = await applyProviderQuotes();
+      if (!silent) {
+        if (updated > 0) {
+          toast.success(`${updated} قیمت دارایی و نرخ دلار بروزرسانی شد.`);
+        } else {
+          toast.success('نرخ دلار بروزرسانی شد.');
+        }
+      }
+    } catch (error) {
+      if (!silent) toast.error('دریافت قیمت از منبع بیرونی ناموفق بود.');
+      console.error(error);
+    } finally {
+      setIsRefreshingProviders(false);
+    }
+  };
 
   const handlePriceChange = (
     id: string,
@@ -213,6 +277,17 @@ export function DailyPricesView() {
           <ArrowRight size={20} />
         </button>
         <h2 className="text-lg font-bold text-white flex-1">بروزرسانی قیمت‌ها</h2>
+        <button
+          onClick={() => void handleRefreshProviders()}
+          disabled={isRefreshingProviders}
+          className="p-2 bg-white/5 rounded-full text-slate-300 hover:bg-white/10 disabled:opacity-50"
+          aria-label="refresh-provider-prices"
+        >
+          <RefreshCw
+            size={18}
+            className={isRefreshingProviders ? 'animate-spin' : undefined}
+          />
+        </button>
       </div>
 
       <div className="p-6 space-y-6">
@@ -229,6 +304,11 @@ export function DailyPricesView() {
           <p className="text-[11px] text-purple-300/60 mt-2">
             این مقدار همان نرخ USD در «نرخ تبدیل ارزها» است و در هر دو جا یکی نگه‌داشته می‌شود.
           </p>
+        </div>
+
+        <div className="bg-white/5 border border-white/8 p-4 rounded-2xl text-sm text-slate-300">
+          بروزرسانی خودکار فقط در بار اول ورود به اپ انجام می‌شود. در این صفحه
+          دریافت دوباره فقط با دکمه‌ی رفرش انجام می‌شود.
         </div>
 
         <div className="space-y-4">

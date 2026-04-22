@@ -25,6 +25,11 @@ export interface PriceSource {
   slug: string;
   provider: PriceSourceProvider;
   label: string;
+  /**
+   * Provider-native lookup key used by the fetch layer. Keep stable once a
+   * source is live; changing it without updating the fetcher breaks refresh.
+   */
+  fetchKey?: string;
   /** If non-null, a successful fetch also upserts this row in currency_rates. */
   updatesRate: RateCurrency | null;
   deprecated?: boolean;
@@ -32,45 +37,59 @@ export interface PriceSource {
 
 export const PRICE_SOURCES: readonly PriceSource[] = [
   {
+    slug: 'tgju.usd',
+    provider: 'tgju',
+    label: 'دلار آزاد · TGJU',
+    fetchKey: 'USD',
+    updatesRate: 'USD',
+  },
+  {
     slug: 'abantether.usdt',
     provider: 'abantether',
     label: 'تتر · آبان‌تتر',
+    fetchKey: 'USDT',
     updatesRate: null,
   },
   {
     slug: 'abantether.btc',
     provider: 'abantether',
     label: 'بیت‌کوین · آبان‌تتر',
+    fetchKey: 'BTC',
     updatesRate: null,
   },
 	 {
     slug: 'abantether.sol',
     provider: 'abantether',
     label: 'سولانا · آبان‌تتر',
+    fetchKey: 'SOL',
     updatesRate: null,
   },
 	{
     slug: 'abantether.eth',
     provider: 'abantether',
     label: 'اتریوم · آبان‌تتر',
+    fetchKey: 'ETH',
     updatesRate: null,
   },
   {
     slug: 'abantether.paxg',
     provider: 'abantether',
     label: 'پکس گلد · آبان‌تتر',
+    fetchKey: 'PAXG',
     updatesRate: null,
   },
 	{
     slug: 'zarpay.gold',
     provider: 'zarpay',
     label: 'طلا ۱۸ عیار · زرپی',
+    fetchKey: 'GOLD',
     updatesRate: null,
   },
 	{
     slug: 'zarpay.silver',
     provider: 'zarpay',
     label: 'نقره · زرپی',
+    fetchKey: 'SILVER',
     updatesRate: null,
   },
 ];

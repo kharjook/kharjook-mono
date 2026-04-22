@@ -14,6 +14,14 @@ import {
 } from 'react';
 import { supabase } from '@/shared/lib/supabase/client';
 import { useToast } from '@/shared/components/Toast';
+import {
+  fetchProviderQuotes,
+  mergeById,
+  mergeCurrencyRates,
+  mergeDailyPrices,
+  persistCurrencyRate,
+  persistProviderQuotes,
+} from '@/features/prices/utils/provider-refresh';
 import type {
   Asset,
   AuthUser,
@@ -50,6 +58,7 @@ interface DataValue {
   setCurrencyRates: Dispatch<SetStateAction<CurrencyRate[]>>;
   setDailyPrices: Dispatch<SetStateAction<DailyPrice[]>>;
   refresh: () => Promise<void>;
+  refreshAll: () => Promise<void>;
 }
 
 interface UIValue {
@@ -96,8 +105,9 @@ export function PortfolioProvider({
 
   const toast = useToast();
   const fetchSeq = useRef(0);
+  const bootExternalSyncDone = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refreshInternal = useCallback(async (includeExternal: boolean) => {
     if (!user) return;
     const seq = ++fetchSeq.current;
     setIsLoadingData(true);
@@ -136,12 +146,69 @@ export function PortfolioProvider({
       if (rateRes.error) throw rateRes.error;
       if (dpRes.error) throw dpRes.error;
 
-      setCategories((catRes.data as Category[]) || []);
-      setAssets((astRes.data as Asset[]) || []);
-      setTransactions((txRes.data as Transaction[]) || []);
-      setWallets((walRes.data as Wallet[]) || []);
-      setCurrencyRates((rateRes.data as CurrencyRate[]) || []);
-      setDailyPrices((dpRes.data as DailyPrice[]) || []);
+      let nextCategories = (catRes.data as Category[]) || [];
+      let nextAssets = (astRes.data as Asset[]) || [];
+      let nextTransactions = (txRes.data as Transaction[]) || [];
+      let nextWallets = (walRes.data as Wallet[]) || [];
+      let nextCurrencyRates = (rateRes.data as CurrencyRate[]) || [];
+      let nextDailyPrices = (dpRes.data as DailyPrice[]) || [];
+
+      if (includeExternal) {
+        try {
+          const providerSlugs = Array.from(
+            new Set(
+              ['tgju.usd', ...nextAssets.map((asset) => asset.price_source_id)].filter(
+                (slug): slug is string => !!slug
+              )
+            )
+          );
+
+          if (providerSlugs.length > 0) {
+            const quotes = await fetchProviderQuotes(providerSlugs);
+            const usdQuote = quotes.find((quote) => quote.slug === 'tgju.usd');
+            const effectiveUsdRate =
+              usdQuote?.priceToman && usdQuote.priceToman > 0
+                ? usdQuote.priceToman
+                : Number(
+                    nextCurrencyRates.find((rate) => rate.currency === 'USD')
+                      ?.toman_per_unit ?? 0
+                  );
+
+            if (usdQuote && usdQuote.priceToman > 0) {
+              const freshRates = await persistCurrencyRate(
+                user.id,
+                'USD',
+                usdQuote.priceToman
+              );
+              nextCurrencyRates = mergeCurrencyRates(nextCurrencyRates, freshRates);
+            }
+
+            if (effectiveUsdRate > 0) {
+              const persisted = await persistProviderQuotes({
+                userId: user.id,
+                assets: nextAssets,
+                dailyPrices: nextDailyPrices,
+                usdRate: effectiveUsdRate,
+                quotes,
+              });
+              nextAssets = mergeById(nextAssets, persisted.assets);
+              nextDailyPrices = mergeDailyPrices(
+                nextDailyPrices,
+                persisted.dailyPrices
+              );
+            }
+          }
+        } catch (error) {
+          console.error('external price sync failed', error);
+        }
+      }
+
+      setCategories(nextCategories);
+      setAssets(nextAssets);
+      setTransactions(nextTransactions);
+      setWallets(nextWallets);
+      setCurrencyRates(nextCurrencyRates);
+      setDailyPrices(nextDailyPrices);
     } catch (error) {
       if (seq !== fetchSeq.current) return;
       console.error('Error fetching data:', error);
@@ -152,6 +219,14 @@ export function PortfolioProvider({
       }
     }
   }, [user, toast]);
+
+  const refresh = useCallback(async () => {
+    await refreshInternal(false);
+  }, [refreshInternal]);
+
+  const refreshAll = useCallback(async () => {
+    await refreshInternal(true);
+  }, [refreshInternal]);
 
   useEffect(() => {
     const {
@@ -164,8 +239,12 @@ export function PortfolioProvider({
 
   useEffect(() => {
     if (user) {
-      refresh();
+      if (!bootExternalSyncDone.current) {
+        bootExternalSyncDone.current = true;
+        void refreshAll();
+      }
     } else {
+      bootExternalSyncDone.current = false;
       setCategories([]);
       setAssets([]);
       setTransactions([]);
@@ -173,7 +252,7 @@ export function PortfolioProvider({
       setCurrencyRates([]);
       setDailyPrices([]);
     }
-  }, [user, refresh]);
+  }, [user, refreshAll]);
 
   const logout = useCallback(async () => {
     setIsLoadingAuth(true);
@@ -206,6 +285,7 @@ export function PortfolioProvider({
       setCurrencyRates,
       setDailyPrices,
       refresh,
+      refreshAll,
     }),
     [
       categories,
@@ -216,6 +296,7 @@ export function PortfolioProvider({
       dailyPrices,
       isLoadingData,
       refresh,
+      refreshAll,
     ]
   );
 
