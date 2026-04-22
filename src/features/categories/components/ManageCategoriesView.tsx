@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Check, ChevronDown, Edit3, Trash2, X } from 'lucide-react';
 import { supabase } from '@/shared/lib/supabase/client';
+import { useToast } from '@/shared/components/Toast';
 import type { Category, CategoryKind } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { CATEGORY_COLORS } from '@/features/categories/constants/category-colors';
@@ -36,6 +37,7 @@ const emptyForm: FormState = {
 
 export function ManageCategoriesView() {
   const router = useRouter();
+  const toast = useToast();
   const { user } = useAuth();
   const { categories, setCategories } = useData();
 
@@ -129,7 +131,7 @@ export function ManageCategoriesView() {
 
     // Defense in depth: a client can't make a category its own ancestor.
     if (parentId && form.editingId && descendantsOfEditing.has(parentId)) {
-      alert('نمی‌توان والدی انتخاب کرد که خودش زیرمجموعه‌ی این دسته است.');
+      toast.error('نمی‌توان والدی انتخاب کرد که خودش زیرمجموعه‌ی این دسته است.');
       return;
     }
 
@@ -166,7 +168,7 @@ export function ManageCategoriesView() {
       resetForm();
     } catch (err) {
       console.error(err);
-      alert('خطا در ثبت دسته بندی');
+      toast.error('خطا در ثبت دسته‌بندی.');
     } finally {
       setIsSubmitting(false);
     }
@@ -201,7 +203,7 @@ export function ManageCategoriesView() {
       if (form.editingId === cat.id) resetForm();
     } catch (err) {
       console.error(err);
-      alert('خطا در حذف');
+      toast.error('خطا در حذف.');
     }
   };
 

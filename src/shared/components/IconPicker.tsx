@@ -4,6 +4,7 @@ import { Camera, Loader2, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { supabase } from '@/shared/lib/supabase/client';
 import { compressImageToSquareWebp } from '@/shared/utils/compress-image';
+import { useToast } from '@/shared/components/Toast';
 
 const BUCKET = 'entity-icons';
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024; // 10 MB raw cap before compression
@@ -41,6 +42,7 @@ export function IconPicker({
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const toast = useToast();
 
   const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -49,11 +51,11 @@ export function IconPicker({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('لطفاً یک فایل تصویری انتخاب کن.');
+      toast.error('لطفاً یک فایل تصویری انتخاب کن.');
       return;
     }
     if (file.size > MAX_SOURCE_BYTES) {
-      alert('حجم تصویر نباید بیشتر از ۱۰ مگابایت باشد.');
+      toast.error('حجم تصویر نباید بیشتر از ۱۰ مگابایت باشد.');
       return;
     }
 
@@ -75,7 +77,7 @@ export function IconPicker({
       onChange(data.publicUrl);
     } catch (err) {
       console.error(err);
-      alert('بارگذاری آیکون ناموفق بود.');
+      toast.error('بارگذاری آیکون ناموفق بود.');
     } finally {
       setIsUploading(false);
     }

@@ -6,6 +6,7 @@ import { Archive, ArrowRight, Edit3, Wallet as WalletIcon, X } from 'lucide-reac
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { IconPicker } from '@/shared/components/IconPicker';
+import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Currency, Wallet } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -32,6 +33,7 @@ const emptyForm: FormState = {
 
 export function ManageWalletsView() {
   const router = useRouter();
+  const toast = useToast();
   const { user } = useAuth();
   const { wallets, setWallets } = useData();
 
@@ -94,7 +96,7 @@ export function ManageWalletsView() {
       resetForm();
     } catch (err) {
       console.error(err);
-      alert('خطا در ثبت کیف پول');
+      toast.error('خطا در ثبت کیف پول.');
     } finally {
       setIsSubmitting(false);
     }
@@ -119,7 +121,7 @@ export function ManageWalletsView() {
       if (form.editingId === w.id) resetForm();
     } catch (err) {
       console.error(err);
-      alert('خطا در بایگانی');
+      toast.error('خطا در بایگانی.');
     } finally {
       setArchivingId(null);
     }

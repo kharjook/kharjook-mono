@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { Activity, ArrowRight, Edit3, Plus, Trash2 } from 'lucide-react';
 import { EntityIcon } from '@/shared/components/EntityIcon';
+import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
@@ -16,6 +17,7 @@ export interface AssetDetailsViewProps {
 
 export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   const router = useRouter();
+  const toast = useToast();
   const { assets, transactions, setTransactions } = useData();
   const { currencyMode, usdRate } = useUI();
 
@@ -66,7 +68,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
       if (error) throw error;
       setTransactions((prev) => prev.filter((tx) => tx.id !== id));
     } catch {
-      alert('خطا در حذف رکورد');
+      toast.error('خطا در حذف رکورد.');
     }
   };
 

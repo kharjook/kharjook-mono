@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
+import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { CurrencyRate } from '@/shared/types/domain';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
@@ -12,6 +13,7 @@ type LocalPrices = Record<string, { toman: string; usd: string }>;
 
 export function DailyPricesView() {
   const router = useRouter();
+  const toast = useToast();
   const { user } = useAuth();
   const { assets, setAssets, setCurrencyRates } = useData();
   const { usdRate } = useUI();
@@ -150,7 +152,7 @@ export function DailyPricesView() {
 
       router.back();
     } catch (error) {
-      alert('خطا در ذخیره قیمت‌ها');
+      toast.error('خطا در ذخیره قیمت‌ها.');
       console.error(error);
     } finally {
       setIsSaving(false);

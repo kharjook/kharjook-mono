@@ -13,6 +13,7 @@ import {
   type SetStateAction,
 } from 'react';
 import { supabase } from '@/shared/lib/supabase/client';
+import { useToast } from '@/shared/components/Toast';
 import type {
   Asset,
   AuthUser,
@@ -85,6 +86,7 @@ export function PortfolioProvider({
 
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>('TOMAN');
 
+  const toast = useToast();
   const fetchSeq = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -129,13 +131,13 @@ export function PortfolioProvider({
     } catch (error) {
       if (seq !== fetchSeq.current) return;
       console.error('Error fetching data:', error);
-      alert('خطا در دریافت اطلاعات از سرور');
+      toast.error('خطا در دریافت اطلاعات از سرور.');
     } finally {
       if (seq === fetchSeq.current) {
         setIsLoadingData(false);
       }
     }
-  }, [user]);
+  }, [user, toast]);
 
   useEffect(() => {
     const {

@@ -8,6 +8,7 @@ import type { Asset } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { IconPicker } from '@/shared/components/IconPicker';
+import { useToast } from '@/shared/components/Toast';
 import {
   PRICE_SOURCES,
   findPriceSource,
@@ -15,6 +16,7 @@ import {
 
 export function ManageAssetsView() {
   const router = useRouter();
+  const toast = useToast();
   const { user } = useAuth();
   const { categories, assets, setAssets } = useData();
 
@@ -68,7 +70,7 @@ export function ManageAssetsView() {
         resetForm();
       }
     } catch (err) {
-      alert('خطا در ثبت دارایی');
+      toast.error('خطا در ثبت دارایی.');
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -110,7 +112,7 @@ export function ManageAssetsView() {
       setAssets((prev) => prev.filter((a) => a.id !== id));
       if (editingId === id) resetForm();
     } catch {
-      alert('خطا در حذف دارایی');
+      toast.error('خطا در حذف دارایی.');
     }
   };
 

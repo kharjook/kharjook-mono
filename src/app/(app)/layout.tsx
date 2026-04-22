@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { createSupabaseServerClient } from '@/shared/lib/supabase/server';
 import { PortfolioProvider } from '@/features/portfolio/PortfolioProvider';
 import { Shell } from '@/features/shell/components/Shell';
+import { ToastProvider } from '@/shared/components/Toast';
 
 export default async function AppLayout({
   children,
@@ -21,8 +22,10 @@ export default async function AppLayout({
   }
 
   return (
-    <PortfolioProvider initialUser={user}>
-      <Shell modal={modal}>{children}</Shell>
-    </PortfolioProvider>
+    <ToastProvider>
+      <PortfolioProvider initialUser={user}>
+        <Shell modal={modal}>{children}</Shell>
+      </PortfolioProvider>
+    </ToastProvider>
   );
 }

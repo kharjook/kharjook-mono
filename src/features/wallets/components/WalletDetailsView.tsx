@@ -13,6 +13,7 @@ import {
   Wallet as WalletIcon,
 } from 'lucide-react';
 import { EntityIcon } from '@/shared/components/EntityIcon';
+import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Asset, Transaction, TransactionType, Wallet } from '@/shared/types/domain';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
@@ -37,6 +38,7 @@ export interface WalletDetailsViewProps {
 
 export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
   const router = useRouter();
+  const toast = useToast();
   const {
     wallets,
     assets,
@@ -79,7 +81,7 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
       setTransactions((prev) => prev.filter((tx) => tx.id !== id));
     } catch (err) {
       console.error(err);
-      alert('خطا در حذف رکورد');
+      toast.error('خطا در حذف رکورد.');
     }
   };
 

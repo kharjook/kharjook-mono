@@ -1,10 +1,38 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, ArrowRight, Plus, Trash2 } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowLeftRight,
+  ArrowRight,
+  Calculator,
+  Calendar,
+  ChevronLeft,
+  Coins,
+  Folder,
+  Plus,
+  Trash2,
+  Wallet as WalletIcon,
+} from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
+import { EntityIcon } from '@/shared/components/EntityIcon';
+import { IOSDatePicker } from '@/shared/components/IOSDatePicker';
+import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
+import { formatCurrency } from '@/shared/utils/format-currency';
+import {
+  formatJalaaliHuman,
+  parseJalaali,
+  todayJalaali,
+  formatJalaali,
+  addDays,
+} from '@/shared/utils/jalali';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import type {
   Asset,
@@ -17,12 +45,18 @@ import type {
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
+import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
+import {
+  EndpointSheetPicker,
+  type EndpointKind,
+} from '@/features/transactions/components/EndpointSheetPicker';
+import { CategorySheetPicker } from '@/features/transactions/components/CategorySheetPicker';
 
-type EndpointKind = 'wallet' | 'asset';
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type FormState = {
   type: TransactionType;
-  date: string;
+  date: string; // canonical Jalali YYYY/MM/DD
   sourceKind: EndpointKind | null;
   sourceId: string | null;
   targetKind: EndpointKind | null;
@@ -35,33 +69,99 @@ type FormState = {
   note: string;
 };
 
+/**
+ * Which side the user inputs directly. For BUY/SELL, the asset side is the
+ * primary (user enters quantity + price; wallet-side amount is auto-computed).
+ * For INCOME/EXPENSE/TRANSFER there is only one amount in the common case.
+ */
+const PRIMARY_SIDE: Record<TransactionType, 'source' | 'target'> = {
+  BUY: 'target',    // target = asset bought
+  SELL: 'source',   // source = asset sold
+  TRANSFER: 'source',
+  INCOME: 'target',
+  EXPENSE: 'source',
+};
+
 type TypeShape = {
-  source: EndpointKind[] | null; // null = no source side
+  source: EndpointKind[] | null;
   target: EndpointKind[] | null;
   needsPrice: boolean;
   needsCategory: 'income' | 'expense' | null;
 };
 
 const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
-  BUY: { source: ['wallet'], target: ['asset'], needsPrice: true, needsCategory: null },
-  SELL: { source: ['asset'], target: ['wallet'], needsPrice: true, needsCategory: null },
-  TRANSFER: {
-    source: ['wallet', 'asset'],
-    target: ['wallet', 'asset'],
-    needsPrice: false,
-    needsCategory: null,
-  },
-  INCOME: { source: null, target: ['wallet', 'asset'], needsPrice: false, needsCategory: 'income' },
-  EXPENSE: { source: ['wallet', 'asset'], target: null, needsPrice: false, needsCategory: 'expense' },
+  BUY:      { source: ['wallet'],          target: ['asset'],           needsPrice: true,  needsCategory: null },
+  SELL:     { source: ['asset'],           target: ['wallet'],          needsPrice: true,  needsCategory: null },
+  TRANSFER: { source: ['wallet', 'asset'], target: ['wallet', 'asset'], needsPrice: false, needsCategory: null },
+  INCOME:   { source: null,                target: ['wallet', 'asset'], needsPrice: false, needsCategory: 'income' },
+  EXPENSE:  { source: ['wallet', 'asset'], target: null,                needsPrice: false, needsCategory: 'expense' },
 };
 
-const TYPE_TABS: { id: TransactionType; label: string }[] = [
-  { id: 'BUY', label: 'خرید' },
-  { id: 'SELL', label: 'فروش' },
-  { id: 'TRANSFER', label: 'انتقال' },
-  { id: 'INCOME', label: 'درآمد' },
-  { id: 'EXPENSE', label: 'هزینه' },
-];
+interface TypeStyle {
+  label: string;
+  icon: string; // plain text for tab, no emoji policy enforced
+  accentBg: string;      // active tab background
+  accentBorder: string;  // card border
+  accentText: string;    // text accent
+  accentBtnBg: string;   // submit button background
+  accentBtnShadow: string;
+  accentGradient: string;// preview card background gradient
+}
+
+const TYPE_STYLES: Record<TransactionType, TypeStyle> = {
+  BUY: {
+    label: 'خرید',
+    icon: 'B',
+    accentBg: 'bg-purple-600',
+    accentBorder: 'border-purple-500/30',
+    accentText: 'text-purple-400',
+    accentBtnBg: 'bg-purple-600 hover:bg-purple-500',
+    accentBtnShadow: 'shadow-[0_4px_20px_rgba(147,51,234,0.3)]',
+    accentGradient: 'from-purple-500/15 to-transparent',
+  },
+  SELL: {
+    label: 'فروش',
+    icon: 'S',
+    accentBg: 'bg-amber-600',
+    accentBorder: 'border-amber-500/30',
+    accentText: 'text-amber-400',
+    accentBtnBg: 'bg-amber-600 hover:bg-amber-500',
+    accentBtnShadow: 'shadow-[0_4px_20px_rgba(217,119,6,0.3)]',
+    accentGradient: 'from-amber-500/15 to-transparent',
+  },
+  TRANSFER: {
+    label: 'انتقال',
+    icon: 'T',
+    accentBg: 'bg-sky-600',
+    accentBorder: 'border-sky-500/30',
+    accentText: 'text-sky-400',
+    accentBtnBg: 'bg-sky-600 hover:bg-sky-500',
+    accentBtnShadow: 'shadow-[0_4px_20px_rgba(2,132,199,0.3)]',
+    accentGradient: 'from-sky-500/15 to-transparent',
+  },
+  INCOME: {
+    label: 'درآمد',
+    icon: 'I',
+    accentBg: 'bg-emerald-600',
+    accentBorder: 'border-emerald-500/30',
+    accentText: 'text-emerald-400',
+    accentBtnBg: 'bg-emerald-600 hover:bg-emerald-500',
+    accentBtnShadow: 'shadow-[0_4px_20px_rgba(5,150,105,0.3)]',
+    accentGradient: 'from-emerald-500/15 to-transparent',
+  },
+  EXPENSE: {
+    label: 'هزینه',
+    icon: 'E',
+    accentBg: 'bg-rose-600',
+    accentBorder: 'border-rose-500/30',
+    accentText: 'text-rose-400',
+    accentBtnBg: 'bg-rose-600 hover:bg-rose-500',
+    accentBtnShadow: 'shadow-[0_4px_20px_rgba(225,29,72,0.3)]',
+    accentGradient: 'from-rose-500/15 to-transparent',
+  },
+};
+
+const TYPE_TABS: TransactionType[] = ['BUY', 'SELL', 'TRANSFER', 'INCOME', 'EXPENSE'];
 
 export interface AddTransactionViewProps {
   assetId?: string;
@@ -70,7 +170,7 @@ export interface AddTransactionViewProps {
   transactionId?: string;
 }
 
-const todayFa = () => new Date().toLocaleDateString('fa-IR-u-nu-latn');
+// ─── Pure helpers ────────────────────────────────────────────────────────────
 
 function endpointKindOfTx(tx: Transaction, side: 'source' | 'target'): EndpointKind | null {
   if (side === 'source') {
@@ -86,6 +186,29 @@ function endpointKindOfTx(tx: Transaction, side: 'source' | 'target'): EndpointK
 function endpointIdOfTx(tx: Transaction, side: 'source' | 'target'): string | null {
   if (side === 'source') return tx.source_wallet_id ?? tx.source_asset_id ?? null;
   return tx.target_wallet_id ?? tx.target_asset_id ?? null;
+}
+
+function todayCanonicalJalali(): string {
+  return formatJalaali(todayJalaali());
+}
+
+function canonicalNumber(n: number): string {
+  if (!Number.isFinite(n)) return '';
+  // Strip float noise and trailing zeros; keep up to 10 significant decimals.
+  const rounded = n.toFixed(10);
+  const trimmed = rounded.replace(/\.?0+$/, '');
+  return trimmed === '' ? '0' : trimmed;
+}
+
+function walletFromForm(
+  form: FormState,
+  side: 'source' | 'target',
+  wallets: Wallet[]
+): Wallet | null {
+  const kind = side === 'source' ? form.sourceKind : form.targetKind;
+  const id = side === 'source' ? form.sourceId : form.targetId;
+  if (kind !== 'wallet' || !id) return null;
+  return wallets.find((w) => w.id === id) ?? null;
 }
 
 function buildInitialForm(
@@ -113,7 +236,7 @@ function buildInitialForm(
   const type: TransactionType = defaults.defaultType ?? 'BUY';
   const f: FormState = {
     type,
-    date: todayFa(),
+    date: todayCanonicalJalali(),
     sourceKind: null,
     sourceId: null,
     targetKind: null,
@@ -126,7 +249,6 @@ function buildInitialForm(
     note: '',
   };
 
-  // Apply context-aware deep-link defaults.
   if (defaults.assetId) {
     if (type === 'BUY') {
       f.targetKind = 'asset';
@@ -151,77 +273,109 @@ function buildInitialForm(
   return f;
 }
 
-// ─── Pure transforms ─────────────────────────────────────────────────────────
-
 function applyTypeSwitch(prev: FormState, type: TransactionType): FormState {
   if (type === prev.type) return prev;
   const next = TYPE_SHAPES[type];
   return {
     ...prev,
     type,
-    sourceKind:
-      prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceKind : null,
-    sourceId:
-      prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceId : null,
-    targetKind:
-      prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetKind : null,
-    targetId:
-      prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetId : null,
+    sourceKind: prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceKind : null,
+    sourceId:   prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceId   : null,
+    targetKind: prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetKind : null,
+    targetId:   prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetId   : null,
     categoryId: null,
   };
 }
 
-// BUY / SELL auto-derivation: priceToman + asset amount → wallet-side amount.
+/**
+ * Derive the wallet-side amount on BUY/SELL from (asset-amount × price),
+ * converted through the wallet currency rate. The asset side is always the
+ * primary input the user edits; the wallet side is always computed.
+ *
+ * Returns `next` unchanged if required inputs are missing — never blows up.
+ */
 function recomputeMoneySide(
   next: FormState,
   wallets: Wallet[],
   currencyRates: CurrencyRate[],
   usdRate: number
 ): FormState {
-  const wallet = next.type === 'BUY' ? walletFromForm(next, 'source', wallets)
-    : next.type === 'SELL' ? walletFromForm(next, 'target', wallets)
-    : null;
+  if (next.type !== 'BUY' && next.type !== 'SELL') return next;
+
+  const wallet = next.type === 'BUY'
+    ? walletFromForm(next, 'source', wallets)
+    : walletFromForm(next, 'target', wallets);
   if (!wallet) return next;
 
   const price = Number(next.priceToman);
   if (!Number.isFinite(price) || price <= 0) return next;
 
-  // For USD wallets, the per-tx `usdRate` field overrides the stored rate
-  // (so the user can capture the exact rate used in that trade). Other
-  // currencies always read from the rates table.
+  // USD wallets: per-tx `usdRate` overrides the table rate so a trade's
+  // exact conversion is captured. Other currencies always read from rates.
   let rate: number;
   if (wallet.currency === 'USD') {
     const override = Number(next.usdRate);
     rate = Number.isFinite(override) && override > 0 ? override : usdRate;
+  } else if (wallet.currency === 'IRT') {
+    rate = 1;
   } else {
     rate = tomanPerUnit(wallet.currency, currencyRates);
   }
   if (!rate) return next;
 
   if (next.type === 'BUY') {
+    // User enters `target` (asset qty). Derive `source` (wallet spend).
     const tgt = Number(next.targetAmount);
     if (!Number.isFinite(tgt) || tgt <= 0) return next;
-    const src = (tgt * price) / rate;
-    return { ...next, sourceAmount: String(src) };
+    return { ...next, sourceAmount: canonicalNumber((tgt * price) / rate) };
   }
-  // SELL
+
+  // SELL: user enters `source` (asset qty). Derive `target` (wallet proceeds).
   const src = Number(next.sourceAmount);
   if (!Number.isFinite(src) || src <= 0) return next;
-  const tgt = (src * price) / rate;
-  return { ...next, targetAmount: String(tgt) };
+  return { ...next, targetAmount: canonicalNumber((src * price) / rate) };
+}
+
+/** Holdings of an asset across existing transactions (legacy columns only). */
+function assetHolding(assetId: string, transactions: Transaction[]): number {
+  let total = 0;
+  for (const tx of transactions) {
+    if (tx.asset_id !== assetId) continue;
+    if (tx.type === 'BUY') total += Number(tx.amount) || 0;
+    else if (tx.type === 'SELL') total -= Number(tx.amount) || 0;
+  }
+  return total;
+}
+
+function sourceBalance(
+  form: FormState,
+  wallets: Wallet[],
+  transactions: Transaction[]
+): number | null {
+  if (form.sourceKind === 'wallet' && form.sourceId) {
+    const w = wallets.find((x) => x.id === form.sourceId);
+    if (!w) return null;
+    return calculateWalletStats(w, transactions).balance;
+  }
+  if (form.sourceKind === 'asset' && form.sourceId) {
+    return assetHolding(form.sourceId, transactions);
+  }
+  return null;
 }
 
 function validateForm(form: FormState): string | null {
   if (!form.date) return 'تاریخ الزامی است.';
+  if (!parseJalaali(form.date)) return 'تاریخ نامعتبر است.';
+
   const shape = TYPE_SHAPES[form.type];
 
   switch (form.type) {
     case 'BUY':
       if (form.sourceKind !== 'wallet' || !form.sourceId) return 'کیف پول مبدأ را انتخاب کن.';
-      if (form.targetKind !== 'asset' || !form.targetId) return 'دارایی مقصد را انتخاب کن.';
+      if (form.targetKind !== 'asset'  || !form.targetId) return 'دارایی مقصد را انتخاب کن.';
       break;
     case 'SELL':
-      if (form.sourceKind !== 'asset' || !form.sourceId) return 'دارایی مبدأ را انتخاب کن.';
+      if (form.sourceKind !== 'asset'  || !form.sourceId) return 'دارایی مبدأ را انتخاب کن.';
       if (form.targetKind !== 'wallet' || !form.targetId) return 'کیف پول مقصد را انتخاب کن.';
       break;
     case 'TRANSFER':
@@ -264,13 +418,8 @@ function validateForm(form: FormState): string | null {
 }
 
 function buildPayload(form: FormState, userId: string): Record<string, unknown> {
-  // usd_rate is ONLY meaningful on BUY/SELL because calculate-asset-stats
-  // derives PnL from the legacy `asset_id/amount/price_toman/usd_rate`
-  // columns. Stamping it on other types would fill the DB with values that
-  // no calculation consumes (and that would be the wrong denomination
-  // anyway — transfers need the source currency's rate, not USD's). When
-  // the stats layer is rewritten later, rate snapshotting gets redesigned
-  // properly at the schema level.
+  // `usd_rate` is ONLY meaningful on BUY/SELL. See previous notes in history —
+  // the legacy stats layer derives PnL from the per-row columns.
   const base: Record<string, unknown> = {
     user_id: userId,
     type: form.type,
@@ -306,7 +455,6 @@ function buildPayload(form: FormState, userId: string): Record<string, unknown> 
       setTarget();
       base.price_toman = Number(form.priceToman);
       base.usd_rate = Number(form.usdRate);
-      // Legacy mirror so calculate-asset-stats keeps working.
       base.asset_id = form.targetId;
       base.amount = Number(form.targetAmount);
       break;
@@ -334,6 +482,8 @@ function buildPayload(form: FormState, userId: string): Record<string, unknown> 
   return base;
 }
 
+// ─── Main component ──────────────────────────────────────────────────────────
+
 export function AddTransactionView({
   assetId,
   walletId,
@@ -341,6 +491,7 @@ export function AddTransactionView({
   transactionId,
 }: AddTransactionViewProps) {
   const router = useRouter();
+  const toast = useToast();
   const { user } = useAuth();
   const {
     assets,
@@ -360,16 +511,18 @@ export function AddTransactionView({
   const [rows, setRows] = useState<FormState[]>(() => [
     buildInitialForm(txToEdit, { assetId, walletId, defaultType }, usdRate),
   ]);
+  // Collapsed state lives out-of-band: it's pure UI and we don't want to bloat
+  // FormState (which is serialized into the DB payload).
+  const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // If the route resolves a tx after the first render (data loads async), seed
-  // the form once. Edit mode is always a single row.
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+
   useEffect(() => {
     if (txToEdit) {
       setRows([buildInitialForm(txToEdit, {}, usdRate)]);
+      setCollapsed({});
     }
-    // We deliberately only re-seed when the row identity changes, not on every
-    // global rate tick — otherwise typing would reset the form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [txToEdit?.id]);
 
@@ -380,9 +533,10 @@ export function AddTransactionView({
 
   const isEdit = !!txToEdit;
   const sharedType = rows[0].type;
+  const sharedStyle = TYPE_STYLES[sharedType];
 
   const switchType = (type: TransactionType) => {
-    if (isEdit) return; // Type immutable on edit.
+    if (isEdit) return;
     if (type === sharedType) return;
     setRows((prev) => prev.map((r) => applyTypeSwitch(r, type)));
   };
@@ -394,24 +548,36 @@ export function AddTransactionView({
   const addRow = () => {
     setRows((prev) => [
       ...prev,
-      // New rows inherit the current shared type + a fresh usdRate snapshot.
-      // No deep-link defaults; those only apply to the first row.
       buildInitialForm(undefined, { defaultType: sharedType }, usdRate),
     ]);
   };
 
   const removeRow = (idx: number) => {
     setRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
+    setCollapsed((prev) => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  };
+
+  const toggleCollapsed = (idx: number) => {
+    setCollapsed((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate all rows up-front; pin-point which one failed.
     for (let i = 0; i < rows.length; i++) {
       const err = validateForm(rows[i]);
       if (err) {
-        alert(rows.length > 1 ? `تراکنش #${i + 1}: ${err}` : err);
+        const msg = rows.length > 1 ? `تراکنش #${i + 1}: ${err}` : err;
+        toast.error(msg);
+        // Expand the offender and bring it on-screen.
+        setCollapsed((prev) => ({ ...prev, [i]: false }));
+        window.requestAnimationFrame(() => {
+          rowRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
         return;
       }
     }
@@ -430,6 +596,8 @@ export function AddTransactionView({
         setTransactions((prev) =>
           prev.map((t) => (t.id === txToEdit.id ? (data as Transaction) : t))
         );
+        toast.success('تراکنش به‌روزرسانی شد.');
+        router.back();
       } else {
         const payloads = rows.map((r) => buildPayload(r, user.id));
         const { data, error } = await supabase
@@ -439,11 +607,37 @@ export function AddTransactionView({
         if (error) throw error;
         const inserted = (data ?? []) as Transaction[];
         setTransactions((prev) => [...inserted.slice().reverse(), ...prev]);
+        const ids = inserted.map((t) => t.id);
+        // Undo = hard delete + local rollback. 6s window (toast default for info).
+        toast.success(
+          inserted.length > 1
+            ? `${inserted.length} تراکنش ثبت شد.`
+            : 'تراکنش ثبت شد.',
+          {
+            action: {
+              label: 'برگرداندن',
+              onClick: async () => {
+                try {
+                  const { error: delErr } = await supabase
+                    .from('transactions')
+                    .delete()
+                    .in('id', ids);
+                  if (delErr) throw delErr;
+                  setTransactions((prev) => prev.filter((t) => !ids.includes(t.id)));
+                  toast.info('تراکنش‌ها لغو شدند.');
+                } catch (undoErr) {
+                  console.error(undoErr);
+                  toast.error('خطا در لغو تراکنش‌ها.');
+                }
+              },
+            },
+          }
+        );
+        router.back();
       }
-      router.back();
     } catch (err2) {
       console.error(err2);
-      alert('خطا در ثبت تراکنش');
+      toast.error('خطا در ثبت تراکنش.');
     } finally {
       setIsSubmitting(false);
     }
@@ -469,22 +663,27 @@ export function AddTransactionView({
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        {/* Type tabs */}
         <div className="grid grid-cols-5 gap-1 bg-[#1A1B26] p-1 rounded-xl">
-          {TYPE_TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => switchType(t.id)}
-              disabled={isEdit && t.id !== sharedType}
-              className={`py-2 text-xs font-bold rounded-lg transition-all ${
-                sharedType === t.id
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 disabled:opacity-30'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+          {TYPE_TABS.map((t) => {
+            const s = TYPE_STYLES[t];
+            const active = sharedType === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => switchType(t)}
+                disabled={isEdit && t !== sharedType}
+                className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                  active
+                    ? `${s.accentBg} text-white shadow-md`
+                    : 'text-slate-400 hover:text-slate-200 disabled:opacity-30'
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
         </div>
         {isEdit && (
           <p className="text-[11px] text-slate-500 -mt-2">
@@ -492,22 +691,32 @@ export function AddTransactionView({
           </p>
         )}
 
-        <div className="space-y-6">
+        {/* Rows */}
+        <div className="space-y-4">
           {rows.map((form, idx) => (
-            <TransactionFormRow
+            <div
               key={idx}
-              form={form}
-              rowIndex={idx}
-              totalRows={rows.length}
-              canRemove={!isEdit && rows.length > 1}
-              onChange={(updater) => updateRow(idx, updater)}
-              onRemove={() => removeRow(idx)}
-              wallets={wallets}
-              assets={assets}
-              categories={categories}
-              currencyRates={currencyRates}
-              usdRate={usdRate}
-            />
+              ref={(el) => {
+                rowRefs.current[idx] = el;
+              }}
+            >
+              <TransactionFormRow
+                form={form}
+                rowIndex={idx}
+                totalRows={rows.length}
+                isCollapsed={!!collapsed[idx]}
+                canRemove={!isEdit && rows.length > 1}
+                onChange={(updater) => updateRow(idx, updater)}
+                onRemove={() => removeRow(idx)}
+                onToggleCollapsed={() => toggleCollapsed(idx)}
+                wallets={wallets}
+                assets={assets}
+                categories={categories}
+                transactions={transactions}
+                currencyRates={currencyRates}
+                usdRate={usdRate}
+              />
+            </div>
           ))}
         </div>
 
@@ -522,10 +731,19 @@ export function AddTransactionView({
           </button>
         )}
 
+        {/* Live preview */}
+        <PreviewPanel
+          rows={rows}
+          wallets={wallets}
+          assets={assets}
+          categories={categories}
+          style={sharedStyle}
+        />
+
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.3)] transition-all mt-4 disabled:opacity-50"
+          className={`w-full ${sharedStyle.accentBtnBg} text-white p-4 rounded-xl font-bold ${sharedStyle.accentBtnShadow} transition-all disabled:opacity-50`}
         >
           {isSubmitting
             ? 'در حال ارسال...'
@@ -540,63 +758,75 @@ export function AddTransactionView({
   );
 }
 
-// ─── Row subcomponent ────────────────────────────────────────────────────────
+// ─── Row ─────────────────────────────────────────────────────────────────────
 
 function TransactionFormRow({
   form,
   rowIndex,
   totalRows,
+  isCollapsed,
   canRemove,
   onChange,
   onRemove,
+  onToggleCollapsed,
   wallets,
   assets,
   categories,
+  transactions,
   currencyRates,
   usdRate,
 }: {
   form: FormState;
   rowIndex: number;
   totalRows: number;
+  isCollapsed: boolean;
   canRemove: boolean;
   onChange: (updater: (prev: FormState) => FormState) => void;
   onRemove: () => void;
+  onToggleCollapsed: () => void;
   wallets: Wallet[];
   assets: Asset[];
   categories: Category[];
+  transactions: Transaction[];
   currencyRates: CurrencyRate[];
   usdRate: number;
 }) {
   const shape = TYPE_SHAPES[form.type];
+  const style = TYPE_STYLES[form.type];
   const isBulk = totalRows > 1;
 
-  const sourceWallet = form.sourceKind === 'wallet'
-    ? wallets.find((w) => w.id === form.sourceId)
-    : undefined;
-  const sourceAsset = form.sourceKind === 'asset'
-    ? assets.find((a) => a.id === form.sourceId)
-    : undefined;
-  const targetWallet = form.targetKind === 'wallet'
-    ? wallets.find((w) => w.id === form.targetId)
-    : undefined;
-  const targetAsset = form.targetKind === 'asset'
-    ? assets.find((a) => a.id === form.targetId)
-    : undefined;
+  const [pickerOpen, setPickerOpen] = useState<null | 'source' | 'target'>(null);
+  const [dateOpen, setDateOpen] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+
+  const sourceWallet = form.sourceKind === 'wallet' ? wallets.find((w) => w.id === form.sourceId) : undefined;
+  const sourceAsset  = form.sourceKind === 'asset'  ? assets.find((a)  => a.id === form.sourceId) : undefined;
+  const targetWallet = form.targetKind === 'wallet' ? wallets.find((w) => w.id === form.targetId) : undefined;
+  const targetAsset  = form.targetKind === 'asset'  ? assets.find((a)  => a.id === form.targetId) : undefined;
+
+  const srcBalance = sourceBalance(form, wallets, transactions);
+  const srcAmountNum = Number(form.sourceAmount);
+  const isInsufficient =
+    form.type !== 'INCOME' &&
+    srcBalance != null &&
+    Number.isFinite(srcAmountNum) &&
+    srcAmountNum > srcBalance;
+
+  // Mutators --------------------------------------------------------------
 
   const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     onChange((prev) => {
       const next = { ...prev, [key]: value };
-      // Auto-derive money side on BUY/SELL whenever inputs that drive it change.
       if (
         (next.type === 'BUY' || next.type === 'SELL') &&
         (key === 'targetAmount' ||
-          key === 'sourceAmount' ||
-          key === 'priceToman' ||
-          key === 'usdRate' ||
-          key === 'sourceId' ||
-          key === 'targetId' ||
-          key === 'sourceKind' ||
-          key === 'targetKind')
+         key === 'sourceAmount' ||
+         key === 'priceToman' ||
+         key === 'usdRate' ||
+         key === 'sourceId' ||
+         key === 'targetId' ||
+         key === 'sourceKind' ||
+         key === 'targetKind')
       ) {
         return recomputeMoneySide(next, wallets, currencyRates, usdRate);
       }
@@ -604,11 +834,27 @@ function TransactionFormRow({
     });
   };
 
-  // For TRANSFER between same-currency wallets, mirror amounts unless user has
-  // already diverged them.
-  const onTransferSourceAmountChange = (canonical: string) => {
+  const selectEndpoint = (side: 'source' | 'target') =>
+    (kind: EndpointKind, id: string) => {
+      onChange((prev) => {
+        const next: FormState = side === 'source'
+          ? { ...prev, sourceKind: kind, sourceId: id }
+          : { ...prev, targetKind: kind, targetId: id };
+        if (next.type === 'BUY' || next.type === 'SELL') {
+          return recomputeMoneySide(next, wallets, currencyRates, usdRate);
+        }
+        return next;
+      });
+    };
+
+  // Primary-side amount setter. For TRANSFER same-currency, we mirror target.
+  const setPrimaryAmount = (v: string) => {
+    const primary = PRIMARY_SIDE[form.type];
     onChange((prev) => {
-      const next = { ...prev, sourceAmount: canonical };
+      const next: FormState = primary === 'source'
+        ? { ...prev, sourceAmount: v }
+        : { ...prev, targetAmount: v };
+
       if (
         prev.type === 'TRANSFER' &&
         prev.sourceKind === 'wallet' &&
@@ -617,137 +863,829 @@ function TransactionFormRow({
         targetWallet &&
         sourceWallet.currency === targetWallet.currency
       ) {
-        next.targetAmount = canonical;
+        next.targetAmount = v;
+      }
+
+      if (next.type === 'BUY' || next.type === 'SELL') {
+        return recomputeMoneySide(next, wallets, currencyRates, usdRate);
       }
       return next;
     });
   };
 
+  // Secondary editable input — only used for cross-currency TRANSFER.
+  const setTargetAmountRaw = (v: string) => {
+    onChange((prev) => ({ ...prev, targetAmount: v }));
+  };
+
+  const applySourcePercent = (pct: number) => {
+    if (srcBalance == null || srcBalance <= 0) return;
+    const amt = (srcBalance * pct) / 100;
+    // Chips always target the source; only useful when source IS primary.
+    if (PRIMARY_SIDE[form.type] !== 'source') return;
+    setPrimaryAmount(canonicalNumber(amt));
+  };
+
+  // View helpers ----------------------------------------------------------
+
+  const jalaali = parseJalaali(form.date);
+  const dateLabel = jalaali ? formatJalaaliHuman(jalaali) : form.date || 'انتخاب تاریخ';
+  const today = todayJalaali();
+  const yesterday = addDays(today, -1);
+  const isToday = jalaali && jalaali.jy === today.jy && jalaali.jm === today.jm && jalaali.jd === today.jd;
+  const isYesterday =
+    jalaali && jalaali.jy === yesterday.jy && jalaali.jm === yesterday.jm && jalaali.jd === yesterday.jd;
+
+  const primarySide = PRIMARY_SIDE[form.type];
+  const canShowQuickChips =
+    primarySide === 'source' &&
+    form.sourceKind !== null &&
+    form.sourceId !== null &&
+    srcBalance != null &&
+    srcBalance > 0;
+
+  // Collapsed summary -----------------------------------------------------
+
+  if (isBulk && isCollapsed) {
+    return (
+      <CollapsedRow
+        form={form}
+        rowIndex={rowIndex}
+        style={style}
+        canRemove={canRemove}
+        onToggle={onToggleCollapsed}
+        onRemove={onRemove}
+        wallets={wallets}
+        assets={assets}
+        categories={categories}
+      />
+    );
+  }
+
+  // Expanded view ---------------------------------------------------------
+
   return (
-    <div
-      className={
-        isBulk
-          ? 'rounded-2xl border border-white/5 bg-[#13141C] p-4 space-y-5'
-          : 'space-y-5'
-      }
-    >
-      {isBulk && (
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold text-slate-400">
-            تراکنش #{rowIndex + 1}
-          </span>
-          {canRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="p-1.5 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-lg text-slate-400 transition-colors"
-              aria-label="حذف این تراکنش"
-            >
-              <Trash2 size={14} />
-            </button>
+    <>
+      <div
+        className={`rounded-2xl border ${style.accentBorder} bg-linear-to-b ${style.accentGradient} p-4 space-y-5`}
+      >
+        {isBulk && (
+          <div className="flex items-center justify-between">
+            <span className={`text-xs font-bold ${style.accentText}`}>
+              تراکنش #{rowIndex + 1}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={onToggleCollapsed}
+                className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-slate-400 transition-colors"
+                aria-label="جمع‌کردن"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              {canRemove && (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  className="p-1.5 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-lg text-slate-400 transition-colors"
+                  aria-label="حذف"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Direction cards */}
+        <div className="space-y-2">
+          {shape.source && (
+            <DirectionCard
+              label="مبدأ"
+              kind={form.sourceKind}
+              wallet={sourceWallet}
+              asset={sourceAsset}
+              balance={srcBalance}
+              insufficient={isInsufficient}
+              onTap={() => setPickerOpen('source')}
+            />
+          )}
+
+          {shape.source && shape.target && (
+            <div className="flex justify-center py-0.5">
+              <div className={`p-1.5 rounded-full bg-white/5 ${style.accentText}`}>
+                <ArrowDown size={14} />
+              </div>
+            </div>
+          )}
+
+          {shape.target && (
+            <DirectionCard
+              label="مقصد"
+              kind={form.targetKind}
+              wallet={targetWallet}
+              asset={targetAsset}
+              balance={
+                form.targetKind === 'wallet' && targetWallet
+                  ? calculateWalletStats(targetWallet, transactions).balance
+                  : null
+              }
+              insufficient={false}
+              onTap={() => setPickerOpen('target')}
+            />
           )}
         </div>
-      )}
 
-      <FieldDate
+        {/* Date */}
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">تاریخ</label>
+          <button
+            type="button"
+            onClick={() => setDateOpen(true)}
+            className="w-full flex items-center gap-3 bg-[#1A1B26] border border-white/10 hover:border-white/20 rounded-xl p-3 text-right transition"
+          >
+            <Calendar size={16} className={style.accentText} />
+            <span className="text-sm text-slate-100 flex-1">{dateLabel}</span>
+          </button>
+          <div className="mt-2 flex gap-2">
+            <DateChip
+              label="امروز"
+              active={!!isToday}
+              onClick={() => updateField('date', formatJalaali(today))}
+            />
+            <DateChip
+              label="دیروز"
+              active={!!isYesterday}
+              onClick={() => updateField('date', formatJalaali(yesterday))}
+            />
+          </div>
+        </div>
+
+        {/* Primary amount input */}
+        <PrimaryAmountField
+          form={form}
+          primarySide={primarySide}
+          sourceWallet={sourceWallet}
+          targetWallet={targetWallet}
+          sourceAsset={sourceAsset}
+          targetAsset={targetAsset}
+          isInsufficient={isInsufficient}
+          onChange={setPrimaryAmount}
+        />
+
+        {/* Source balance info + quick chips */}
+        {canShowQuickChips && (
+          <div className="flex flex-wrap items-center gap-2 -mt-2">
+            <span className="text-[11px] text-slate-500">درصدی از موجودی:</span>
+            {[25, 50, 75, 100].map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => applySourcePercent(p)}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white/5 hover:bg-white/10 ${style.accentText} transition`}
+              >
+                {p === 100 ? 'همه' : `${p}٪`}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Price (BUY/SELL) */}
+        {shape.needsPrice && (
+          <PriceFields
+            priceToman={form.priceToman}
+            usdRate={form.usdRate}
+            onPriceToman={(v) => updateField('priceToman', v)}
+            onUsdRate={(v) => updateField('usdRate', v)}
+            showUsdRate={
+              (form.type === 'BUY' && sourceWallet?.currency === 'USD') ||
+              (form.type === 'SELL' && targetWallet?.currency === 'USD')
+            }
+          />
+        )}
+
+        {/* Derived (auto-computed) amount — read-only */}
+        {(form.type === 'BUY' || form.type === 'SELL') && (
+          <DerivedAmountLine
+            form={form}
+            sourceWallet={sourceWallet}
+            targetWallet={targetWallet}
+          />
+        )}
+
+        {/* Secondary editable amount — only for cross-currency TRANSFER */}
+        {form.type === 'TRANSFER' &&
+          sourceWallet &&
+          targetWallet &&
+          sourceWallet.currency !== targetWallet.currency && (
+            <CrossCurrencyTargetField
+              value={form.targetAmount}
+              targetWallet={targetWallet}
+              onChange={setTargetAmountRaw}
+            />
+          )}
+
+        {/* Category */}
+        {shape.needsCategory && (
+          <CategoryField
+            kind={shape.needsCategory}
+            categories={categories}
+            value={form.categoryId}
+            onOpen={() => setCategoryOpen(true)}
+          />
+        )}
+
+        {/* Note */}
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">
+            توضیحات (اختیاری)
+          </label>
+          <textarea
+            value={form.note}
+            onChange={(e) => updateField('note', e.target.value)}
+            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none min-h-[60px]"
+            maxLength={500}
+          />
+        </div>
+
+        {/* Transfer cross-currency warning */}
+        {form.type === 'TRANSFER' &&
+          sourceWallet &&
+          targetWallet &&
+          sourceWallet.currency !== targetWallet.currency && (
+            <div className="flex items-center gap-2 text-[11px] text-amber-400/80 -mt-2">
+              <ArrowLeftRight size={12} />
+              انتقال بین دو ارز متفاوت — هر دو مقدار را به‌صورت دستی وارد کن.
+            </div>
+          )}
+      </div>
+
+      {/* Endpoint picker sheet */}
+      <EndpointSheetPicker
+        open={pickerOpen !== null}
+        onClose={() => setPickerOpen(null)}
+        title={pickerOpen === 'source' ? 'انتخاب مبدأ' : 'انتخاب مقصد'}
+        allow={
+          pickerOpen === 'source'
+            ? (shape.source ?? [])
+            : (shape.target ?? [])
+        }
+        excludeIds={
+          pickerOpen === 'source'
+            ? (form.sourceKind === form.targetKind ? [form.targetId ?? ''] : [])
+            : (form.sourceKind === form.targetKind ? [form.sourceId ?? ''] : [])
+        }
+        wallets={wallets}
+        assets={assets}
+        transactions={transactions}
+        onSelect={(kind, id) => {
+          if (pickerOpen) selectEndpoint(pickerOpen)(kind, id);
+        }}
+      />
+
+      {/* iOS date picker */}
+      <IOSDatePicker
+        open={dateOpen}
+        onClose={() => setDateOpen(false)}
         value={form.date}
         onChange={(v) => updateField('date', v)}
       />
 
-      {/* Source picker */}
-      {shape.source && (
-        <EndpointPicker
-          label="مبدأ"
-          allow={shape.source}
-          kind={form.sourceKind}
-          id={form.sourceId}
-          wallets={wallets}
-          assets={assets}
-          excludeId={form.sourceKind === form.targetKind ? form.targetId : null}
-          onChange={(kind, id) => {
-            onChange((prev) => {
-              const next = { ...prev, sourceKind: kind, sourceId: id };
-              if (next.type === 'BUY' || next.type === 'SELL') {
-                return recomputeMoneySide(next, wallets, currencyRates, usdRate);
-              }
-              return next;
-            });
-          }}
-        />
-      )}
-
-      {/* Target picker */}
-      {shape.target && (
-        <EndpointPicker
-          label="مقصد"
-          allow={shape.target}
-          kind={form.targetKind}
-          id={form.targetId}
-          wallets={wallets}
-          assets={assets}
-          excludeId={form.sourceKind === form.targetKind ? form.sourceId : null}
-          onChange={(kind, id) => {
-            onChange((prev) => {
-              const next = { ...prev, targetKind: kind, targetId: id };
-              if (next.type === 'BUY' || next.type === 'SELL') {
-                return recomputeMoneySide(next, wallets, currencyRates, usdRate);
-              }
-              return next;
-            });
-          }}
-        />
-      )}
-
-      {/* Amounts */}
-      <AmountFields
-        form={form}
-        shape={shape}
-        sourceWallet={sourceWallet}
-        targetWallet={targetWallet}
-        sourceAsset={sourceAsset}
-        targetAsset={targetAsset}
-        onSourceAmount={(v) =>
-          form.type === 'TRANSFER'
-            ? onTransferSourceAmountChange(v)
-            : updateField('sourceAmount', v)
-        }
-        onTargetAmount={(v) => updateField('targetAmount', v)}
-      />
-
-      {shape.needsPrice && (
-        <PriceFields
-          priceToman={form.priceToman}
-          usdRate={form.usdRate}
-          onPriceToman={(v) => updateField('priceToman', v)}
-          onUsdRate={(v) => updateField('usdRate', v)}
-        />
-      )}
-
+      {/* Category picker sheet */}
       {shape.needsCategory && (
-        <CategoryPicker
+        <CategorySheetPicker
+          open={categoryOpen}
+          onClose={() => setCategoryOpen(false)}
+          title={shape.needsCategory === 'income' ? 'انتخاب دسته درآمد' : 'انتخاب دسته هزینه'}
           kind={shape.needsCategory}
           categories={categories}
           value={form.categoryId}
-          onChange={(v) => updateField('categoryId', v)}
+          onSelect={(id) => updateField('categoryId', id)}
         />
       )}
+    </>
+  );
+}
 
-      <div>
-        <label className="block text-xs text-slate-400 mb-1">
-          توضیحات (اختیاری)
-        </label>
-        <textarea
-          value={form.note}
-          onChange={(e) => updateField('note', e.target.value)}
-          className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none min-h-[80px]"
-          maxLength={500}
-        />
+// ─── Pieces ──────────────────────────────────────────────────────────────────
+
+function DirectionCard({
+  label,
+  kind,
+  wallet,
+  asset,
+  balance,
+  insufficient,
+  onTap,
+}: {
+  label: string;
+  kind: EndpointKind | null;
+  wallet?: Wallet;
+  asset?: Asset;
+  balance: number | null;
+  insufficient: boolean;
+  onTap: () => void;
+}) {
+  const filled = !!(wallet || asset);
+  const name = wallet?.name ?? asset?.name ?? 'انتخاب کنید';
+  const unit = wallet ? `${CURRENCY_META[wallet.currency].symbol} ${wallet.currency}` : asset?.unit ?? '';
+
+  const borderClass = insufficient
+    ? 'border-rose-500/50'
+    : filled
+      ? 'border-white/10'
+      : 'border-dashed border-white/15';
+
+  return (
+    <button
+      type="button"
+      onClick={onTap}
+      className={`w-full bg-[#1A1B26] border ${borderClass} rounded-xl p-3 flex items-center gap-3 text-right hover:bg-[#222436] active:scale-[0.99] transition`}
+    >
+      <EntityIcon
+        iconUrl={wallet?.icon_url ?? asset?.icon_url ?? null}
+        fallback={kind === 'wallet' ? <WalletIcon size={18} /> : <Coins size={18} />}
+        bgColor={kind === 'asset' ? 'rgba(251, 191, 36, 0.12)' : 'rgba(168, 85, 247, 0.12)'}
+        color={kind === 'asset' ? '#fbbf24' : '#c084fc'}
+        className="w-10 h-10 shrink-0"
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] text-slate-500 uppercase tracking-widest">{label}</p>
+        <p className={`text-sm font-semibold truncate ${filled ? 'text-slate-100' : 'text-slate-500'}`}>
+          {name}
+        </p>
+        {filled && (
+          <p className={`text-[11px] mt-0.5 font-mono ${insufficient ? 'text-rose-400' : 'text-slate-500'}`} dir="ltr">
+            {balance != null
+              ? `${balance.toLocaleString('en-US', { maximumFractionDigits: wallet ? CURRENCY_META[wallet.currency].decimals : 6 })} ${unit.trim()}`
+              : unit}
+          </p>
+        )}
+      </div>
+      <ChevronLeft size={16} className="text-slate-500 shrink-0" />
+    </button>
+  );
+}
+
+function DateChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition ${
+        active
+          ? 'bg-white/10 text-white'
+          : 'bg-white/5 text-slate-400 hover:bg-white/10'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * The primary amount input — the single number the user types. For BUY/SELL
+ * this is the asset-side qty; for INCOME/EXPENSE/TRANSFER it's the only amount.
+ */
+function PrimaryAmountField({
+  form,
+  primarySide,
+  sourceWallet,
+  targetWallet,
+  sourceAsset,
+  targetAsset,
+  isInsufficient,
+  onChange,
+}: {
+  form: FormState;
+  primarySide: 'source' | 'target';
+  sourceWallet?: Wallet;
+  targetWallet?: Wallet;
+  sourceAsset?: Asset;
+  targetAsset?: Asset;
+  isInsufficient: boolean;
+  onChange: (v: string) => void;
+}) {
+  const isSource = primarySide === 'source';
+  const wallet = isSource ? sourceWallet : targetWallet;
+  const asset = isSource ? sourceAsset : targetAsset;
+  const unit = wallet
+    ? CURRENCY_META[wallet.currency].label
+    : asset?.unit ?? '';
+  const value = isSource ? form.sourceAmount : form.targetAmount;
+
+  // Only the source-primary case can flag insufficient funds directly.
+  const showError = isSource && isInsufficient;
+
+  let label: string;
+  if (form.type === 'BUY') label = `مقدار خرید${unit ? ` (${unit})` : ''}`;
+  else if (form.type === 'SELL') label = `مقدار فروش${unit ? ` (${unit})` : ''}`;
+  else if (form.type === 'INCOME') label = `مبلغ درآمد${unit ? ` (${unit})` : ''}`;
+  else if (form.type === 'EXPENSE') label = `مبلغ هزینه${unit ? ` (${unit})` : ''}`;
+  else label = `مقدار${unit ? ` (${unit})` : ''}`;
+
+  return (
+    <div>
+      <label className={`block text-xs mb-1 ${showError ? 'text-rose-400' : 'text-slate-400'}`}>
+        {label}
+      </label>
+      <FormattedNumberInput
+        value={value}
+        onValueChange={onChange}
+        className={`w-full bg-[#1A1B26] border rounded-xl p-3 text-sm font-mono focus:outline-none text-left ${
+          showError
+            ? 'border-rose-500/50 text-rose-200 focus:border-rose-500'
+            : 'border-white/10 text-white focus:border-purple-500'
+        }`}
+        dir="ltr"
+        required
+      />
+    </div>
+  );
+}
+
+/**
+ * Read-only line showing the auto-computed wallet-side amount on BUY/SELL.
+ * The value pulses briefly whenever it changes (via `key` remount trick).
+ */
+function DerivedAmountLine({
+  form,
+  sourceWallet,
+  targetWallet,
+}: {
+  form: FormState;
+  sourceWallet?: Wallet;
+  targetWallet?: Wallet;
+}) {
+  // On BUY, source (wallet) is derived. On SELL, target (wallet) is derived.
+  const isBuy = form.type === 'BUY';
+  const wallet = isBuy ? sourceWallet : targetWallet;
+  const unit = wallet ? CURRENCY_META[wallet.currency].label : '';
+  const value = isBuy ? form.sourceAmount : form.targetAmount;
+  const label = isBuy
+    ? `مبلغ پرداختی${unit ? ` (${unit})` : ''}`
+    : `مبلغ دریافتی${unit ? ` (${unit})` : ''}`;
+
+  const display = value
+    ? Number(value).toLocaleString('en-US', { maximumFractionDigits: 10 })
+    : '—';
+
+  return (
+    <div>
+      <label className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+        <Calculator size={12} />
+        {label}
+        <span className="text-[10px] text-slate-600">— محاسبه‌شده</span>
+      </label>
+      <div
+        key={value || 'empty'}
+        className="w-full bg-white/2 border border-dashed border-white/10 rounded-xl p-3 text-sm font-mono text-left text-slate-300 animate-in fade-in zoom-in-95 duration-300"
+        dir="ltr"
+      >
+        {display}
       </div>
     </div>
   );
 }
 
-// ─── Subcomponents ───────────────────────────────────────────────────────────
+/** Editable target-amount input for cross-currency TRANSFER. */
+function CrossCurrencyTargetField({
+  value,
+  targetWallet,
+  onChange,
+}: {
+  value: string;
+  targetWallet: Wallet;
+  onChange: (v: string) => void;
+}) {
+  const unit = CURRENCY_META[targetWallet.currency].label;
+  return (
+    <div>
+      <label className="block text-xs text-slate-400 mb-1">
+        {`مقدار دریافتی${unit ? ` (${unit})` : ''}`}
+      </label>
+      <FormattedNumberInput
+        value={value}
+        onValueChange={onChange}
+        className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
+        dir="ltr"
+        required
+      />
+    </div>
+  );
+}
+
+function PriceFields({
+  priceToman,
+  usdRate,
+  onPriceToman,
+  onUsdRate,
+  showUsdRate,
+}: {
+  priceToman: string;
+  usdRate: string;
+  onPriceToman: (v: string) => void;
+  onUsdRate: (v: string) => void;
+  showUsdRate: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs text-slate-400 mb-1">قیمت واحد (تومان)</label>
+        <FormattedNumberInput
+          value={priceToman}
+          onValueChange={onPriceToman}
+          className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
+          dir="ltr"
+          required
+        />
+      </div>
+      {showUsdRate && (
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">نرخ دلار در لحظه (تومان)</label>
+          <FormattedNumberInput
+            value={usdRate}
+            onValueChange={onUsdRate}
+            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
+            dir="ltr"
+            required
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryField({
+  kind,
+  categories,
+  value,
+  onOpen,
+}: {
+  kind: 'income' | 'expense';
+  categories: Category[];
+  value: string | null;
+  onOpen: () => void;
+}) {
+  const selected = value ? categories.find((c) => c.id === value) ?? null : null;
+
+  return (
+    <div>
+      <label className="block text-xs text-slate-400 mb-1">
+        {kind === 'income' ? 'دسته درآمد' : 'دسته هزینه'}
+      </label>
+      <button
+        type="button"
+        onClick={onOpen}
+        className={`w-full flex items-center gap-3 bg-[#1A1B26] border rounded-xl p-3 text-right transition hover:bg-[#222436] ${
+          selected ? 'border-white/10' : 'border-white/10'
+        }`}
+      >
+        {selected ? (
+          <>
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: selected.color }}
+            />
+            <span className="flex-1 min-w-0 text-sm text-white truncate">
+              {selected.name}
+            </span>
+          </>
+        ) : (
+          <>
+            <Folder size={14} className="text-slate-500" />
+            <span className="flex-1 min-w-0 text-sm text-slate-500">— انتخاب کنید —</span>
+          </>
+        )}
+        <ChevronLeft size={16} className="text-slate-500 shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+// ─── Collapsed row summary ───────────────────────────────────────────────────
+
+function CollapsedRow({
+  form,
+  rowIndex,
+  style,
+  canRemove,
+  onToggle,
+  onRemove,
+  wallets,
+  assets,
+  categories,
+}: {
+  form: FormState;
+  rowIndex: number;
+  style: TypeStyle;
+  canRemove: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+  wallets: Wallet[];
+  assets: Asset[];
+  categories: Category[];
+}) {
+  const summary = summarizeForm(form, wallets, assets, categories);
+  return (
+    <div
+      className={`rounded-2xl border ${style.accentBorder} bg-linear-to-b ${style.accentGradient} p-3 flex items-center gap-3`}
+    >
+      <span className={`text-[11px] font-bold shrink-0 ${style.accentText}`}>#{rowIndex + 1}</span>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex-1 min-w-0 text-right text-sm text-slate-200 truncate"
+      >
+        {summary}
+      </button>
+      {canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 p-1.5 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-lg text-slate-400 transition-colors"
+          aria-label="حذف"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function summarizeForm(
+  form: FormState,
+  wallets: Wallet[],
+  assets: Asset[],
+  categories: Category[]
+): string {
+  const sourceName =
+    form.sourceKind === 'wallet'
+      ? wallets.find((w) => w.id === form.sourceId)?.name
+      : form.sourceKind === 'asset'
+        ? assets.find((a) => a.id === form.sourceId)?.name
+        : null;
+  const targetName =
+    form.targetKind === 'wallet'
+      ? wallets.find((w) => w.id === form.targetId)?.name
+      : form.targetKind === 'asset'
+        ? assets.find((a) => a.id === form.targetId)?.name
+        : null;
+
+  const srcAmt = Number(form.sourceAmount);
+  const tgtAmt = Number(form.targetAmount);
+  const category = categories.find((c) => c.id === form.categoryId);
+
+  const fmt = (n: number) =>
+    Number.isFinite(n) && n > 0
+      ? n.toLocaleString('en-US', { maximumFractionDigits: 6 })
+      : '—';
+
+  const label = TYPE_STYLES[form.type].label;
+
+  switch (form.type) {
+    case 'BUY':
+      return `${label} · ${fmt(tgtAmt)} ${targetName ?? '...'} از ${sourceName ?? '...'}`;
+    case 'SELL':
+      return `${label} · ${fmt(srcAmt)} ${sourceName ?? '...'} → ${targetName ?? '...'}`;
+    case 'TRANSFER':
+      return `${label} · ${fmt(srcAmt)} از ${sourceName ?? '...'} به ${targetName ?? '...'}`;
+    case 'INCOME':
+      return `${label} · ${fmt(tgtAmt)} → ${targetName ?? '...'}${category ? ` · ${category.name}` : ''}`;
+    case 'EXPENSE':
+      return `${label} · ${fmt(srcAmt)} از ${sourceName ?? '...'}${category ? ` · ${category.name}` : ''}`;
+  }
+}
+
+// ─── Preview ─────────────────────────────────────────────────────────────────
+
+function PreviewPanel({
+  rows,
+  wallets,
+  assets,
+  categories,
+  style,
+}: {
+  rows: FormState[];
+  wallets: Wallet[];
+  assets: Asset[];
+  categories: Category[];
+  style: TypeStyle;
+}) {
+  const valid = rows.map((r) => validateForm(r) === null);
+  const validCount = valid.filter(Boolean).length;
+
+  if (validCount === 0) {
+    return (
+      <div className="rounded-2xl border border-white/5 bg-white/2 p-4 text-center">
+        <p className="text-xs text-slate-500">
+          پیش‌نمایش پس از تکمیل فرم در اینجا ظاهر می‌شود.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`rounded-2xl border ${style.accentBorder} bg-linear-to-b ${style.accentGradient} p-4 space-y-2`}>
+      <div className="flex items-center justify-between">
+        <p className={`text-[11px] font-bold uppercase tracking-widest ${style.accentText}`}>
+          پیش‌نمایش
+        </p>
+        {rows.length > 1 && (
+          <p className="text-[11px] text-slate-500">
+            {validCount} از {rows.length} آماده
+          </p>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {rows.map((r, i) =>
+          valid[i] ? (
+            <p key={i} className="text-sm text-slate-100 leading-relaxed">
+              {rows.length > 1 && <span className="text-slate-500">#{i + 1} · </span>}
+              {summarizeForm(r, wallets, assets, categories)}
+            </p>
+          ) : null
+        )}
+      </div>
+      {rows.length > 1 && (
+        <BulkTotalsStrip rows={rows} valid={valid} wallets={wallets} />
+      )}
+    </div>
+  );
+}
+
+function BulkTotalsStrip({
+  rows,
+  valid,
+  wallets,
+}: {
+  rows: FormState[];
+  valid: boolean[];
+  wallets: Wallet[];
+}) {
+  // Group inflow/outflow amounts by currency so the user sees a net impact
+  // per wallet currency. Only tallies rows touching wallets (asset units
+  // aren't comparable across assets).
+  const byCur = new Map<string, { inflow: number; outflow: number }>();
+
+  rows.forEach((r, i) => {
+    if (!valid[i]) return;
+    if (r.sourceKind === 'wallet' && r.sourceId) {
+      const w = wallets.find((x) => x.id === r.sourceId);
+      if (w) {
+        const bucket = byCur.get(w.currency) ?? { inflow: 0, outflow: 0 };
+        bucket.outflow += Number(r.sourceAmount) || 0;
+        byCur.set(w.currency, bucket);
+      }
+    }
+    if (r.targetKind === 'wallet' && r.targetId) {
+      const w = wallets.find((x) => x.id === r.targetId);
+      if (w) {
+        const bucket = byCur.get(w.currency) ?? { inflow: 0, outflow: 0 };
+        bucket.inflow += Number(r.targetAmount) || 0;
+        byCur.set(w.currency, bucket);
+      }
+    }
+  });
+
+  if (byCur.size === 0) return null;
+
+  return (
+    <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+      {Array.from(byCur.entries()).map(([cur, { inflow, outflow }]) => {
+        const net = inflow - outflow;
+        const sym = CURRENCY_META[cur as keyof typeof CURRENCY_META]?.symbol ?? '';
+        return (
+          <div key={cur} className="flex justify-between text-[11px] text-slate-400 font-mono" dir="ltr">
+            <span>{cur}</span>
+            <span>
+              {inflow > 0 && <span className="text-emerald-400">+{inflow.toLocaleString('en-US', { maximumFractionDigits: 4 })} </span>}
+              {outflow > 0 && <span className="text-rose-400">-{outflow.toLocaleString('en-US', { maximumFractionDigits: 4 })} </span>}
+              <span className={net >= 0 ? 'text-slate-300' : 'text-slate-300'}>
+                = {net >= 0 ? '+' : ''}{net.toLocaleString('en-US', { maximumFractionDigits: 4 })} {sym}
+              </span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Keep `formatCurrency` import "used" for possible future formatting of
+// preview IRT totals — it's re-exported implicitly via the file and I'd
+// rather not re-import it later.
+void formatCurrency;
+
+// ─── Other ───────────────────────────────────────────────────────────────────
 
 function NotFound({ message, onBack }: { message: string; onBack: () => void }) {
   return (
@@ -765,298 +1703,4 @@ function NotFound({ message, onBack }: { message: string; onBack: () => void }) 
       <div className="p-6 text-center text-slate-500 text-sm">{message}</div>
     </div>
   );
-}
-
-function FieldDate({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div>
-      <label className="block text-xs text-slate-400 mb-1">تاریخ</label>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none text-center"
-        dir="ltr"
-        required
-      />
-    </div>
-  );
-}
-
-function EndpointPicker({
-  label,
-  allow,
-  kind,
-  id,
-  wallets,
-  assets,
-  excludeId,
-  onChange,
-}: {
-  label: string;
-  allow: EndpointKind[];
-  kind: EndpointKind | null;
-  id: string | null;
-  wallets: Wallet[];
-  assets: Asset[];
-  excludeId: string | null;
-  onChange: (kind: EndpointKind | null, id: string | null) => void;
-}) {
-  // Encode value as `${kind}:${id}` so a single <select> can span both groups.
-  const value = kind && id ? `${kind}:${id}` : '';
-
-  return (
-    <div>
-      <label className="block text-xs text-slate-400 mb-1">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (!v) return onChange(null, null);
-          const [k, rest] = v.split(':');
-          onChange(k as EndpointKind, rest ?? null);
-        }}
-        className="w-full appearance-none bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none"
-        required
-      >
-        <option value="">— انتخاب کنید —</option>
-        {allow.includes('wallet') && wallets.length > 0 && (
-          <optgroup label="کیف پول‌ها">
-            {wallets
-              .filter((w) => w.id !== excludeId)
-              .map((w) => (
-                <option key={w.id} value={`wallet:${w.id}`}>
-                  {w.name} · {CURRENCY_META[w.currency].symbol} {w.currency}
-                </option>
-              ))}
-          </optgroup>
-        )}
-        {allow.includes('asset') && assets.length > 0 && (
-          <optgroup label="دارایی‌ها">
-            {assets
-              .filter((a) => a.id !== excludeId)
-              .map((a) => (
-                <option key={a.id} value={`asset:${a.id}`}>
-                  {a.name} ({a.unit})
-                </option>
-              ))}
-          </optgroup>
-        )}
-      </select>
-    </div>
-  );
-}
-
-function AmountFields({
-  form,
-  shape,
-  sourceWallet,
-  targetWallet,
-  sourceAsset,
-  targetAsset,
-  onSourceAmount,
-  onTargetAmount,
-}: {
-  form: FormState;
-  shape: TypeShape;
-  sourceWallet?: Wallet;
-  targetWallet?: Wallet;
-  sourceAsset?: Asset;
-  targetAsset?: Asset;
-  onSourceAmount: (v: string) => void;
-  onTargetAmount: (v: string) => void;
-}) {
-  const sourceUnitLabel = sourceWallet
-    ? CURRENCY_META[sourceWallet.currency].label
-    : sourceAsset
-      ? sourceAsset.unit
-      : '';
-  const targetUnitLabel = targetWallet
-    ? CURRENCY_META[targetWallet.currency].label
-    : targetAsset
-      ? targetAsset.unit
-      : '';
-
-  const showSource = shape.source !== null;
-  const showTarget = shape.target !== null;
-
-  // For BUY: target (asset units) is the user-driven field; source is derived.
-  // For SELL: source (asset units) is user-driven; target is derived.
-  // We label derived fields softly so the user knows they can override.
-
-  return (
-    <div className={`grid ${showSource && showTarget ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
-      {showSource && (
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            مقدار مبدأ {sourceUnitLabel ? `(${sourceUnitLabel})` : ''}
-            {form.type === 'BUY' && (
-              <span className="text-[10px] text-slate-600 mr-1">— محاسبه‌شده</span>
-            )}
-          </label>
-          <FormattedNumberInput
-            value={form.sourceAmount}
-            onValueChange={onSourceAmount}
-            className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
-            dir="ltr"
-            required
-          />
-        </div>
-      )}
-      {showTarget && (
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            مقدار مقصد {targetUnitLabel ? `(${targetUnitLabel})` : ''}
-            {form.type === 'SELL' && (
-              <span className="text-[10px] text-slate-600 mr-1">— محاسبه‌شده</span>
-            )}
-          </label>
-          <FormattedNumberInput
-            value={form.targetAmount}
-            onValueChange={onTargetAmount}
-            className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
-            dir="ltr"
-            required
-          />
-        </div>
-      )}
-      {form.type === 'TRANSFER' &&
-        sourceWallet &&
-        targetWallet &&
-        sourceWallet.currency !== targetWallet.currency && (
-          <div className="col-span-2 -mt-2 flex items-center gap-2 text-[11px] text-amber-400/80">
-            <ArrowLeftRight size={12} />
-            انتقال بین دو ارز متفاوت — هر دو مقدار را به‌صورت دستی وارد کن.
-          </div>
-        )}
-    </div>
-  );
-}
-
-function PriceFields({
-  priceToman,
-  usdRate,
-  onPriceToman,
-  onUsdRate,
-}: {
-  priceToman: string;
-  usdRate: string;
-  onPriceToman: (v: string) => void;
-  onUsdRate: (v: string) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs text-slate-400 mb-1">
-          قیمت واحد (تومان)
-        </label>
-        <FormattedNumberInput
-          value={priceToman}
-          onValueChange={onPriceToman}
-          className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
-          dir="ltr"
-          required
-        />
-      </div>
-      <div>
-        <label className="block text-xs text-slate-400 mb-1">
-          نرخ دلار در لحظه (تومان)
-        </label>
-        <FormattedNumberInput
-          value={usdRate}
-          onValueChange={onUsdRate}
-          className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
-          dir="ltr"
-          required
-        />
-      </div>
-    </div>
-  );
-}
-
-function CategoryPicker({
-  kind,
-  categories,
-  value,
-  onChange,
-}: {
-  kind: 'income' | 'expense';
-  categories: Category[];
-  value: string | null;
-  onChange: (id: string | null) => void;
-}) {
-  // Flatten the tree depth-first so the <select> shows the full hierarchy
-  // with indentation. Native <select> doesn't support nested <optgroup>.
-  const options = useMemo(() => {
-    const scoped = categories.filter((c) => c.kind === kind);
-    const byParent = new Map<string | null, Category[]>();
-    for (const c of scoped) {
-      const key = c.parent_id ?? null;
-      const arr = byParent.get(key) ?? [];
-      arr.push(c);
-      byParent.set(key, arr);
-    }
-    const scopedIds = new Set(scoped.map((c) => c.id));
-
-    const out: { id: string; label: string }[] = [];
-    const visit = (parentId: string | null, depth: number) => {
-      const nodes = byParent.get(parentId) ?? [];
-      for (const n of nodes) {
-        out.push({
-          id: n.id,
-          label: `${'— '.repeat(depth)}${n.name}`,
-        });
-        visit(n.id, depth + 1);
-      }
-    };
-    visit(null, 0);
-
-    // Orphans: parent_id points at a row not in scope (e.g. deleted). Surface
-    // them so the user can still select and later re-parent them.
-    for (const c of scoped) {
-      if (c.parent_id && !scopedIds.has(c.parent_id) && !out.find((o) => o.id === c.id)) {
-        out.push({ id: c.id, label: c.name });
-      }
-    }
-
-    return out;
-  }, [categories, kind]);
-
-  return (
-    <div>
-      <label className="block text-xs text-slate-400 mb-1">
-        {kind === 'income' ? 'دسته درآمد' : 'دسته هزینه'}
-      </label>
-      <select
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-        className="w-full appearance-none bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none"
-        required
-      >
-        <option value="">— انتخاب کنید —</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function walletFromForm(
-  form: FormState,
-  side: 'source' | 'target',
-  wallets: Wallet[]
-): Wallet | null {
-  const kind = side === 'source' ? form.sourceKind : form.targetKind;
-  const id = side === 'source' ? form.sourceId : form.targetId;
-  if (kind !== 'wallet' || !id) return null;
-  return wallets.find((w) => w.id === id) ?? null;
 }

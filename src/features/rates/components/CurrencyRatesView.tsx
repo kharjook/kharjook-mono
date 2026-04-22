@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
+import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { CurrencyRate, RateCurrency } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -25,6 +26,7 @@ const buildLocal = (rates: CurrencyRate[]): LocalRates => {
 
 export function CurrencyRatesView() {
   const router = useRouter();
+  const toast = useToast();
   const { user } = useAuth();
   const { currencyRates, setCurrencyRates } = useData();
 
@@ -52,7 +54,7 @@ export function CurrencyRatesView() {
       if (!raw) continue;
       const n = Number(raw);
       if (!Number.isFinite(n) || n <= 0) {
-        alert(`نرخ نامعتبر برای ${CURRENCY_META[c].label}.`);
+        toast.error(`نرخ نامعتبر برای ${CURRENCY_META[c].label}.`);
         return;
       }
       rows.push({
@@ -87,7 +89,7 @@ export function CurrencyRatesView() {
       router.back();
     } catch (err) {
       console.error(err);
-      alert('خطا در ذخیره نرخ‌ها');
+      toast.error('خطا در ذخیره نرخ‌ها.');
     } finally {
       setIsSaving(false);
     }
