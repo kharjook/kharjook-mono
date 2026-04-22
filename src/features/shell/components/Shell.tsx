@@ -23,7 +23,7 @@ export function Shell({ children, modal }: ShellProps) {
         <header className="px-6 py-4 flex justify-between items-center bg-[#1A1B26] border-b border-white/5 z-10">
           <div className="flex flex-col">
             <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-l from-purple-400 to-purple-600">
-              سبدینو
+              خرجوک
             </h1>
             <span className="text-[10px] text-slate-500 uppercase tracking-widest">
               مدیریت دارایی

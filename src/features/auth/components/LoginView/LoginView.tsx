@@ -25,7 +25,7 @@ export function LoginView() {
             <Wallet size={32} className="text-purple-500" />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
-            سبدینو
+            خرجوک
           </h1>
         </div>
 
