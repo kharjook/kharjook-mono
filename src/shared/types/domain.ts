@@ -65,6 +65,28 @@ export interface CurrencyRate {
   updated_at: string;
 }
 
+/**
+ * End-of-day price snapshot per user × asset × Jalali date.
+ *
+ * `source` priority (higher wins on the same key):
+ *   manual (user explicit) > trade (derived from a BUY/SELL) > auto (reserved)
+ *
+ * `date_string` is canonical zero-padded Jalali "YYYY/MM/DD" — lexicographic
+ * comparison is chronological; reports rely on that invariant.
+ */
+export type DailyPriceSource = 'manual' | 'trade' | 'auto';
+
+export interface DailyPrice {
+  user_id: string;
+  asset_id: string;
+  date_string: string;
+  price_toman: number;
+  price_usd: number;
+  source: DailyPriceSource;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Transaction {
   id: string;
   user_id: string;

@@ -6,7 +6,6 @@ import {
   BarChart3,
   ChevronLeft,
   Coins,
-  FileText,
   LogOut,
   Tag,
   TrendingUp,
@@ -118,19 +117,21 @@ export function SettingsTab() {
 
         <button
           type="button"
-          disabled
-          className="w-full bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex items-center justify-between text-right opacity-60 cursor-not-allowed"
+          onClick={() => router.push('/reports')}
+          className="w-full bg-[#1A1B26] hover:bg-purple-500/10 border border-white/5 hover:border-purple-500/20 p-4 rounded-2xl flex items-center justify-between text-right transition-colors group"
         >
           <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-slate-500/10 flex items-center justify-center text-slate-400">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:bg-purple-500/20 transition-colors">
               <BarChart3 size={20} />
             </div>
             <div className="text-right">
               <p className="font-medium text-slate-200">گزارش‌ها</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">به‌زودی</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                درآمد، هزینه و سود/زیان دارایی‌ها
+              </p>
             </div>
           </div>
-          <FileText size={16} className="text-slate-600" />
+          <ChevronLeft size={20} className="text-slate-600" />
         </button>
 
         <button

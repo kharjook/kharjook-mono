@@ -6,8 +6,9 @@ import { ArrowRight, RefreshCw } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
-import type { CurrencyRate } from '@/shared/types/domain';
+import type { CurrencyRate, DailyPrice } from '@/shared/types/domain';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
+import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
 
@@ -15,7 +16,7 @@ export function DailyPricesView() {
   const router = useRouter();
   const toast = useToast();
   const { user } = useAuth();
-  const { assets, setAssets, setCurrencyRates } = useData();
+  const { assets, setAssets, setCurrencyRates, setDailyPrices } = useData();
   const { usdRate } = useUI();
 
   const [isSaving, setIsSaving] = useState(false);
@@ -148,6 +149,49 @@ export function DailyPricesView() {
           fresh.forEach((r) => map.set(r.currency, r));
           return Array.from(map.values());
         });
+      }
+
+      // -----------------------------------------------------------------
+      // Snapshot today's prices into `daily_prices` (source='manual').
+      // Manual always overrides any prior trade/auto snapshot for the same
+      // day via a normal upsert. Only rows with a positive toman price are
+      // worth storing; zeros would pollute historical P/L lookups.
+      // This runs AFTER the assets cache is saved; if it fails we show a
+      // non-fatal warning — the primary save already succeeded.
+      // -----------------------------------------------------------------
+      const today = formatJalaali(todayJalaali());
+      const snapshotPayload: Omit<DailyPrice, 'created_at' | 'updated_at'>[] =
+        assetUpdates
+          .filter((a) => a.price_toman > 0 && a.price_usd >= 0)
+          .map((a) => ({
+            user_id: user.id,
+            asset_id: a.id,
+            date_string: today,
+            price_toman: a.price_toman,
+            price_usd: a.price_usd,
+            source: 'manual' as const,
+          }));
+
+      if (snapshotPayload.length > 0) {
+        const { data: dpData, error: dpErr } = await supabase
+          .from('daily_prices')
+          .upsert(snapshotPayload, { onConflict: 'user_id,asset_id,date_string' })
+          .select();
+
+        if (dpErr) {
+          // Non-fatal: the live cache is fresh; history just missed today.
+          console.error('daily_prices upsert failed', dpErr);
+          toast.info('قیمت‌ها ذخیره شد؛ اما ثبت تاریخچه‌ی روزانه ناموفق بود.');
+        } else {
+          const fresh = (dpData as DailyPrice[]) || [];
+          setDailyPrices((prev) => {
+            const key = (p: DailyPrice) =>
+              `${p.user_id}|${p.asset_id}|${p.date_string}`;
+            const map = new Map(prev.map((p) => [key(p), p]));
+            for (const p of fresh) map.set(key(p), p);
+            return Array.from(map.values());
+          });
+        }
       }
 
       router.back();

@@ -38,6 +38,7 @@ import type {
   Asset,
   Category,
   CurrencyRate,
+  DailyPrice,
   Transaction,
   TransactionType,
   Wallet,
@@ -482,6 +483,49 @@ function buildPayload(form: FormState, userId: string): Record<string, unknown> 
   return base;
 }
 
+/**
+ * Build daily_prices rows from freshly-saved BUY/SELL transactions.
+ *
+ * Writes with `ignoreDuplicates: true` so ANY existing snapshot on that
+ * (user, asset, date_string) key survives untouched — critical for the
+ * source-priority contract: manual > trade > auto. If two trades happen
+ * the same day, first-writer-wins is good enough; manual save will
+ * overwrite regardless.
+ *
+ * Only trades with a positive `price_toman` AND positive `usd_rate` are
+ * snapshotted. Without a rate we cannot materialize a true usd price, and
+ * a zero would contaminate P/L lookups.
+ */
+function buildTradeSnapshots(
+  txs: Transaction[],
+  userId: string
+): Omit<DailyPrice, 'created_at' | 'updated_at'>[] {
+  const out: Omit<DailyPrice, 'created_at' | 'updated_at'>[] = [];
+  for (const tx of txs) {
+    if (tx.type !== 'BUY' && tx.type !== 'SELL') continue;
+    const assetId =
+      tx.asset_id ?? (tx.type === 'BUY' ? tx.target_asset_id : tx.source_asset_id);
+    if (!assetId) continue;
+    if (!tx.date_string) continue;
+    if (!/^[0-9]{4}\/[0-9]{2}\/[0-9]{2}$/.test(tx.date_string)) continue;
+
+    const priceToman = Number(tx.price_toman);
+    const rate = Number(tx.usd_rate);
+    if (!Number.isFinite(priceToman) || priceToman <= 0) continue;
+    if (!Number.isFinite(rate) || rate <= 0) continue;
+
+    out.push({
+      user_id: userId,
+      asset_id: assetId,
+      date_string: tx.date_string,
+      price_toman: priceToman,
+      price_usd: priceToman / rate,
+      source: 'trade',
+    });
+  }
+  return out;
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function AddTransactionView({
@@ -499,7 +543,9 @@ export function AddTransactionView({
     categories,
     transactions,
     currencyRates,
+    dailyPrices,
     setTransactions,
+    setDailyPrices,
   } = useData();
   const { usdRate } = useUI();
 
@@ -565,6 +611,68 @@ export function AddTransactionView({
     setCollapsed((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
+  /**
+   * Best-effort snapshot of BUY/SELL trades into `daily_prices`.
+   *
+   * Source-priority contract:
+   *   manual > trade > auto   (higher NEVER gets overwritten by lower)
+   *
+   * We implement it client-side with a check-then-upsert:
+   *   1. Build candidate rows from the txs we just saved.
+   *   2. Drop any whose (asset_id, date_string) already has a MANUAL row.
+   *   3. Within this batch, dedupe to one row per (asset_id, date_string),
+   *      keeping the LAST occurrence (matches the user's typing order, and
+   *      for a single-tx edit there's nothing to dedupe).
+   *   4. Regular upsert — overwriting any prior trade/auto row for the
+   *      same key is the correct behavior for edits.
+   *
+   * Race with a concurrent manual save between step 2 and step 4 is
+   * tolerated: this is a single-user mobile app, interactions are serial.
+   *
+   * Failures are logged but NEVER abort the primary save. The live
+   * `assets.price_*` cache is not involved here.
+   */
+  const persistTradeSnapshots = async (txs: Transaction[]) => {
+    const candidates = buildTradeSnapshots(txs, user.id);
+    if (candidates.length === 0) return;
+
+    const manualKeys = new Set(
+      dailyPrices
+        .filter((p) => p.source === 'manual')
+        .map((p) => `${p.asset_id}|${p.date_string}`)
+    );
+
+    const byKey = new Map<
+      string,
+      Omit<DailyPrice, 'created_at' | 'updated_at'>
+    >();
+    for (const row of candidates) {
+      const key = `${row.asset_id}|${row.date_string}`;
+      if (manualKeys.has(key)) continue;
+      byKey.set(key, row); // last wins
+    }
+    const rows = [...byKey.values()];
+    if (rows.length === 0) return;
+
+    const { data, error } = await supabase
+      .from('daily_prices')
+      .upsert(rows, { onConflict: 'user_id,asset_id,date_string' })
+      .select();
+    if (error) {
+      console.error('daily_prices trade snapshot failed', error);
+      return;
+    }
+    const fresh = (data as DailyPrice[]) || [];
+    if (fresh.length === 0) return;
+    setDailyPrices((prev) => {
+      const key = (p: DailyPrice) =>
+        `${p.user_id}|${p.asset_id}|${p.date_string}`;
+      const map = new Map(prev.map((p) => [key(p), p]));
+      for (const p of fresh) map.set(key(p), p);
+      return Array.from(map.values());
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -593,9 +701,12 @@ export function AddTransactionView({
           .select()
           .single();
         if (error) throw error;
+        const updated = data as Transaction;
         setTransactions((prev) =>
-          prev.map((t) => (t.id === txToEdit.id ? (data as Transaction) : t))
+          prev.map((t) => (t.id === txToEdit.id ? updated : t))
         );
+        // Snapshot (trade) this edit too — never overwrites manual on conflict.
+        await persistTradeSnapshots([updated]);
         toast.success('تراکنش به‌روزرسانی شد.');
         router.back();
       } else {
@@ -607,6 +718,8 @@ export function AddTransactionView({
         if (error) throw error;
         const inserted = (data ?? []) as Transaction[];
         setTransactions((prev) => [...inserted.slice().reverse(), ...prev]);
+        // Best-effort: snapshot trades in parallel with the success toast.
+        await persistTradeSnapshots(inserted);
         const ids = inserted.map((t) => t.id);
         // Undo = hard delete + local rollback. 6s window (toast default for info).
         toast.success(
