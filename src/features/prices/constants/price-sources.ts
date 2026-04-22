@@ -19,7 +19,7 @@ import type { RateCurrency } from '@/shared/types/domain';
  *     AND `currency_rates.USD.toman_per_unit`). This is wired in the fetch
  *     layer later; catalog just declares intent here.
  */
-export type PriceSourceProvider = 'abantether' | 'tgju';
+export type PriceSourceProvider = 'abantether' | 'tgju' | 'zarpay';
 
 export interface PriceSource {
   slug: string;
@@ -41,6 +41,36 @@ export const PRICE_SOURCES: readonly PriceSource[] = [
     slug: 'abantether.btc',
     provider: 'abantether',
     label: 'بیت‌کوین · آبان‌تتر',
+    updatesRate: null,
+  },
+	 {
+    slug: 'abantether.sol',
+    provider: 'abantether',
+    label: 'سولانا · آبان‌تتر',
+    updatesRate: null,
+  },
+	{
+    slug: 'abantether.eth',
+    provider: 'abantether',
+    label: 'اتریوم · آبان‌تتر',
+    updatesRate: null,
+  },
+  {
+    slug: 'abantether.paxg',
+    provider: 'abantether',
+    label: 'پکس گلد · آبان‌تتر',
+    updatesRate: null,
+  },
+	{
+    slug: 'zarpay.gold',
+    provider: 'zarpay',
+    label: 'طلا ۱۸ عیار · زرپی',
+    updatesRate: null,
+  },
+	{
+    slug: 'zarpay.silver',
+    provider: 'zarpay',
+    label: 'نقره · زرپی',
     updatesRate: null,
   },
 ];
