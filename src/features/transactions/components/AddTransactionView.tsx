@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, ArrowRight } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Plus, Trash2 } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { supabase } from '@/shared/lib/supabase/client';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import type {
   Asset,
   Category,
+  CurrencyRate,
   Transaction,
   TransactionType,
   Wallet,
@@ -150,6 +151,189 @@ function buildInitialForm(
   return f;
 }
 
+// ─── Pure transforms ─────────────────────────────────────────────────────────
+
+function applyTypeSwitch(prev: FormState, type: TransactionType): FormState {
+  if (type === prev.type) return prev;
+  const next = TYPE_SHAPES[type];
+  return {
+    ...prev,
+    type,
+    sourceKind:
+      prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceKind : null,
+    sourceId:
+      prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceId : null,
+    targetKind:
+      prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetKind : null,
+    targetId:
+      prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetId : null,
+    categoryId: null,
+  };
+}
+
+// BUY / SELL auto-derivation: priceToman + asset amount → wallet-side amount.
+function recomputeMoneySide(
+  next: FormState,
+  wallets: Wallet[],
+  currencyRates: CurrencyRate[],
+  usdRate: number
+): FormState {
+  const wallet = next.type === 'BUY' ? walletFromForm(next, 'source', wallets)
+    : next.type === 'SELL' ? walletFromForm(next, 'target', wallets)
+    : null;
+  if (!wallet) return next;
+
+  const price = Number(next.priceToman);
+  if (!Number.isFinite(price) || price <= 0) return next;
+
+  // For USD wallets, the per-tx `usdRate` field overrides the stored rate
+  // (so the user can capture the exact rate used in that trade). Other
+  // currencies always read from the rates table.
+  let rate: number;
+  if (wallet.currency === 'USD') {
+    const override = Number(next.usdRate);
+    rate = Number.isFinite(override) && override > 0 ? override : usdRate;
+  } else {
+    rate = tomanPerUnit(wallet.currency, currencyRates);
+  }
+  if (!rate) return next;
+
+  if (next.type === 'BUY') {
+    const tgt = Number(next.targetAmount);
+    if (!Number.isFinite(tgt) || tgt <= 0) return next;
+    const src = (tgt * price) / rate;
+    return { ...next, sourceAmount: String(src) };
+  }
+  // SELL
+  const src = Number(next.sourceAmount);
+  if (!Number.isFinite(src) || src <= 0) return next;
+  const tgt = (src * price) / rate;
+  return { ...next, targetAmount: String(tgt) };
+}
+
+function validateForm(form: FormState): string | null {
+  if (!form.date) return 'تاریخ الزامی است.';
+  const shape = TYPE_SHAPES[form.type];
+
+  switch (form.type) {
+    case 'BUY':
+      if (form.sourceKind !== 'wallet' || !form.sourceId) return 'کیف پول مبدأ را انتخاب کن.';
+      if (form.targetKind !== 'asset' || !form.targetId) return 'دارایی مقصد را انتخاب کن.';
+      break;
+    case 'SELL':
+      if (form.sourceKind !== 'asset' || !form.sourceId) return 'دارایی مبدأ را انتخاب کن.';
+      if (form.targetKind !== 'wallet' || !form.targetId) return 'کیف پول مقصد را انتخاب کن.';
+      break;
+    case 'TRANSFER':
+      if (!form.sourceKind || !form.sourceId) return 'مبدأ را انتخاب کن.';
+      if (!form.targetKind || !form.targetId) return 'مقصد را انتخاب کن.';
+      if (form.sourceKind !== form.targetKind) {
+        return 'انتقال فقط بین دو کیف پول یا بین دو دارایی ممکن است.';
+      }
+      if (form.sourceId === form.targetId) return 'مبدأ و مقصد نباید یکی باشند.';
+      break;
+    case 'INCOME':
+      if (!form.targetKind || !form.targetId) return 'مقصد را انتخاب کن.';
+      if (!form.categoryId) return 'دسته درآمد الزامی است.';
+      break;
+    case 'EXPENSE':
+      if (!form.sourceKind || !form.sourceId) return 'مبدأ را انتخاب کن.';
+      if (!form.categoryId) return 'دسته هزینه الزامی است.';
+      break;
+  }
+
+  const needsSrc = form.type !== 'INCOME';
+  const needsTgt = form.type !== 'EXPENSE';
+  if (needsSrc) {
+    const v = Number(form.sourceAmount);
+    if (!Number.isFinite(v) || v <= 0) return 'مقدار مبدأ نامعتبر است.';
+  }
+  if (needsTgt) {
+    const v = Number(form.targetAmount);
+    if (!Number.isFinite(v) || v <= 0) return 'مقدار مقصد نامعتبر است.';
+  }
+
+  if (shape.needsPrice) {
+    const p = Number(form.priceToman);
+    const u = Number(form.usdRate);
+    if (!Number.isFinite(p) || p <= 0) return 'قیمت واحد (تومان) نامعتبر است.';
+    if (!Number.isFinite(u) || u <= 0) return 'نرخ دلار نامعتبر است.';
+  }
+
+  return null;
+}
+
+function buildPayload(form: FormState, userId: string): Record<string, unknown> {
+  // usd_rate is ONLY meaningful on BUY/SELL because calculate-asset-stats
+  // derives PnL from the legacy `asset_id/amount/price_toman/usd_rate`
+  // columns. Stamping it on other types would fill the DB with values that
+  // no calculation consumes (and that would be the wrong denomination
+  // anyway — transfers need the source currency's rate, not USD's). When
+  // the stats layer is rewritten later, rate snapshotting gets redesigned
+  // properly at the schema level.
+  const base: Record<string, unknown> = {
+    user_id: userId,
+    type: form.type,
+    date_string: form.date,
+    note: form.note || null,
+    source_wallet_id: null,
+    source_asset_id: null,
+    target_wallet_id: null,
+    target_asset_id: null,
+    source_amount: null,
+    target_amount: null,
+    category_id: null,
+    asset_id: null,
+    amount: null,
+    price_toman: null,
+    usd_rate: null,
+  };
+
+  const setSource = () => {
+    if (form.sourceKind === 'wallet') base.source_wallet_id = form.sourceId;
+    else if (form.sourceKind === 'asset') base.source_asset_id = form.sourceId;
+    base.source_amount = Number(form.sourceAmount);
+  };
+  const setTarget = () => {
+    if (form.targetKind === 'wallet') base.target_wallet_id = form.targetId;
+    else if (form.targetKind === 'asset') base.target_asset_id = form.targetId;
+    base.target_amount = Number(form.targetAmount);
+  };
+
+  switch (form.type) {
+    case 'BUY':
+      setSource();
+      setTarget();
+      base.price_toman = Number(form.priceToman);
+      base.usd_rate = Number(form.usdRate);
+      // Legacy mirror so calculate-asset-stats keeps working.
+      base.asset_id = form.targetId;
+      base.amount = Number(form.targetAmount);
+      break;
+    case 'SELL':
+      setSource();
+      setTarget();
+      base.price_toman = Number(form.priceToman);
+      base.usd_rate = Number(form.usdRate);
+      base.asset_id = form.sourceId;
+      base.amount = Number(form.sourceAmount);
+      break;
+    case 'TRANSFER':
+      setSource();
+      setTarget();
+      break;
+    case 'INCOME':
+      setTarget();
+      base.category_id = form.categoryId;
+      break;
+    case 'EXPENSE':
+      setSource();
+      base.category_id = form.categoryId;
+      break;
+  }
+  return base;
+}
+
 export function AddTransactionView({
   assetId,
   walletId,
@@ -173,16 +357,16 @@ export function AddTransactionView({
     [transactionId, transactions]
   );
 
-  const [form, setForm] = useState<FormState>(() =>
-    buildInitialForm(txToEdit, { assetId, walletId, defaultType }, usdRate)
-  );
+  const [rows, setRows] = useState<FormState[]>(() => [
+    buildInitialForm(txToEdit, { assetId, walletId, defaultType }, usdRate),
+  ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // If the route resolves a tx after the first render (data loads async), seed
-  // the form once.
+  // the form once. Edit mode is always a single row.
   useEffect(() => {
     if (txToEdit) {
-      setForm(buildInitialForm(txToEdit, {}, usdRate));
+      setRows([buildInitialForm(txToEdit, {}, usdRate)]);
     }
     // We deliberately only re-seed when the row identity changes, not on every
     // global rate tick — otherwise typing would reset the form.
@@ -194,7 +378,197 @@ export function AddTransactionView({
     return <NotFound message="تراکنش پیدا نشد." onBack={() => router.back()} />;
   }
 
+  const isEdit = !!txToEdit;
+  const sharedType = rows[0].type;
+
+  const switchType = (type: TransactionType) => {
+    if (isEdit) return; // Type immutable on edit.
+    if (type === sharedType) return;
+    setRows((prev) => prev.map((r) => applyTypeSwitch(r, type)));
+  };
+
+  const updateRow = (idx: number, updater: (prev: FormState) => FormState) => {
+    setRows((prev) => prev.map((r, i) => (i === idx ? updater(r) : r)));
+  };
+
+  const addRow = () => {
+    setRows((prev) => [
+      ...prev,
+      // New rows inherit the current shared type + a fresh usdRate snapshot.
+      // No deep-link defaults; those only apply to the first row.
+      buildInitialForm(undefined, { defaultType: sharedType }, usdRate),
+    ]);
+  };
+
+  const removeRow = (idx: number) => {
+    setRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Validate all rows up-front; pin-point which one failed.
+    for (let i = 0; i < rows.length; i++) {
+      const err = validateForm(rows[i]);
+      if (err) {
+        alert(rows.length > 1 ? `تراکنش #${i + 1}: ${err}` : err);
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      if (isEdit && txToEdit) {
+        const payload = buildPayload(rows[0], user.id);
+        const { data, error } = await supabase
+          .from('transactions')
+          .update(payload)
+          .eq('id', txToEdit.id)
+          .select()
+          .single();
+        if (error) throw error;
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === txToEdit.id ? (data as Transaction) : t))
+        );
+      } else {
+        const payloads = rows.map((r) => buildPayload(r, user.id));
+        const { data, error } = await supabase
+          .from('transactions')
+          .insert(payloads)
+          .select();
+        if (error) throw error;
+        const inserted = (data ?? []) as Transaction[];
+        setTransactions((prev) => [...inserted.slice().reverse(), ...prev]);
+      }
+      router.back();
+    } catch (err2) {
+      console.error(err2);
+      alert('خطا در ثبت تراکنش');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="bg-[#0F1015] min-h-full pb-10 animate-in slide-in-from-bottom-8 duration-300 relative z-50">
+      <div className="sticky top-0 bg-[#161722]/90 backdrop-blur-md px-6 py-4 flex items-center gap-4 border-b border-white/5 z-10">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="p-2 -mr-2 bg-white/5 rounded-full text-slate-300 hover:bg-white/10"
+        >
+          <ArrowRight size={20} />
+        </button>
+        <h2 className="text-lg font-bold text-white flex-1">
+          {isEdit
+            ? 'ویرایش تراکنش'
+            : rows.length > 1
+              ? `ثبت ${rows.length} تراکنش`
+              : 'ثبت تراکنش جدید'}
+        </h2>
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <div className="grid grid-cols-5 gap-1 bg-[#1A1B26] p-1 rounded-xl">
+          {TYPE_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => switchType(t.id)}
+              disabled={isEdit && t.id !== sharedType}
+              className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                sharedType === t.id
+                  ? 'bg-purple-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 disabled:opacity-30'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {isEdit && (
+          <p className="text-[11px] text-slate-500 -mt-2">
+            نوع تراکنش پس از ثبت قابل تغییر نیست.
+          </p>
+        )}
+
+        <div className="space-y-6">
+          {rows.map((form, idx) => (
+            <TransactionFormRow
+              key={idx}
+              form={form}
+              rowIndex={idx}
+              totalRows={rows.length}
+              canRemove={!isEdit && rows.length > 1}
+              onChange={(updater) => updateRow(idx, updater)}
+              onRemove={() => removeRow(idx)}
+              wallets={wallets}
+              assets={assets}
+              categories={categories}
+              currencyRates={currencyRates}
+              usdRate={usdRate}
+            />
+          ))}
+        </div>
+
+        {!isEdit && (
+          <button
+            type="button"
+            onClick={addRow}
+            className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-dashed border-white/10 text-slate-300 p-3 rounded-xl text-sm font-bold transition-all"
+          >
+            <Plus size={16} />
+            افزودن تراکنش دیگر
+          </button>
+        )}
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.3)] transition-all mt-4 disabled:opacity-50"
+        >
+          {isSubmitting
+            ? 'در حال ارسال...'
+            : isEdit
+              ? 'ثبت تغییرات'
+              : rows.length > 1
+                ? `ثبت ${rows.length} تراکنش`
+                : 'ثبت تراکنش'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ─── Row subcomponent ────────────────────────────────────────────────────────
+
+function TransactionFormRow({
+  form,
+  rowIndex,
+  totalRows,
+  canRemove,
+  onChange,
+  onRemove,
+  wallets,
+  assets,
+  categories,
+  currencyRates,
+  usdRate,
+}: {
+  form: FormState;
+  rowIndex: number;
+  totalRows: number;
+  canRemove: boolean;
+  onChange: (updater: (prev: FormState) => FormState) => void;
+  onRemove: () => void;
+  wallets: Wallet[];
+  assets: Asset[];
+  categories: Category[];
+  currencyRates: CurrencyRate[];
+  usdRate: number;
+}) {
   const shape = TYPE_SHAPES[form.type];
+  const isBulk = totalRows > 1;
 
   const sourceWallet = form.sourceKind === 'wallet'
     ? wallets.find((w) => w.id === form.sourceId)
@@ -209,63 +583,8 @@ export function AddTransactionView({
     ? assets.find((a) => a.id === form.targetId)
     : undefined;
 
-  const switchType = (type: TransactionType) => {
-    if (type === form.type) return;
-    if (txToEdit) return; // Type immutable on edit.
-    const next = TYPE_SHAPES[type];
-
-    setForm((prev) => ({
-      ...prev,
-      type,
-      sourceKind:
-        prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceKind : null,
-      sourceId:
-        prev.sourceKind && next.source?.includes(prev.sourceKind) ? prev.sourceId : null,
-      targetKind:
-        prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetKind : null,
-      targetId:
-        prev.targetKind && next.target?.includes(prev.targetKind) ? prev.targetId : null,
-      categoryId: null,
-    }));
-  };
-
-  // BUY / SELL auto-derivation: priceToman + asset amount → wallet-side amount.
-  const recomputeMoneySide = (next: FormState): FormState => {
-    const wallet = next.type === 'BUY' ? walletFromForm(next, 'source', wallets)
-      : next.type === 'SELL' ? walletFromForm(next, 'target', wallets)
-      : null;
-    if (!wallet) return next;
-
-    const price = Number(next.priceToman);
-    if (!Number.isFinite(price) || price <= 0) return next;
-
-    // For USD wallets, the per-tx `usdRate` field overrides the stored rate
-    // (so the user can capture the exact rate used in that trade). Other
-    // currencies always read from the rates table.
-    let rate: number;
-    if (wallet.currency === 'USD') {
-      const override = Number(next.usdRate);
-      rate = Number.isFinite(override) && override > 0 ? override : usdRate;
-    } else {
-      rate = tomanPerUnit(wallet.currency, currencyRates);
-    }
-    if (!rate) return next;
-
-    if (next.type === 'BUY') {
-      const tgt = Number(next.targetAmount);
-      if (!Number.isFinite(tgt) || tgt <= 0) return next;
-      const src = (tgt * price) / rate;
-      return { ...next, sourceAmount: String(src) };
-    }
-    // SELL
-    const src = Number(next.sourceAmount);
-    if (!Number.isFinite(src) || src <= 0) return next;
-    const tgt = (src * price) / rate;
-    return { ...next, targetAmount: String(tgt) };
-  };
-
   const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((prev) => {
+    onChange((prev) => {
       const next = { ...prev, [key]: value };
       // Auto-derive money side on BUY/SELL whenever inputs that drive it change.
       if (
@@ -279,7 +598,7 @@ export function AddTransactionView({
           key === 'sourceKind' ||
           key === 'targetKind')
       ) {
-        return recomputeMoneySide(next);
+        return recomputeMoneySide(next, wallets, currencyRates, usdRate);
       }
       return next;
     });
@@ -288,7 +607,7 @@ export function AddTransactionView({
   // For TRANSFER between same-currency wallets, mirror amounts unless user has
   // already diverged them.
   const onTransferSourceAmountChange = (canonical: string) => {
-    setForm((prev) => {
+    onChange((prev) => {
       const next = { ...prev, sourceAmount: canonical };
       if (
         prev.type === 'TRANSFER' &&
@@ -304,316 +623,126 @@ export function AddTransactionView({
     });
   };
 
-  const validate = (): string | null => {
-    if (!form.date) return 'تاریخ الزامی است.';
-
-    switch (form.type) {
-      case 'BUY':
-        if (form.sourceKind !== 'wallet' || !form.sourceId) return 'کیف پول مبدأ را انتخاب کن.';
-        if (form.targetKind !== 'asset' || !form.targetId) return 'دارایی مقصد را انتخاب کن.';
-        break;
-      case 'SELL':
-        if (form.sourceKind !== 'asset' || !form.sourceId) return 'دارایی مبدأ را انتخاب کن.';
-        if (form.targetKind !== 'wallet' || !form.targetId) return 'کیف پول مقصد را انتخاب کن.';
-        break;
-      case 'TRANSFER':
-        if (!form.sourceKind || !form.sourceId) return 'مبدأ را انتخاب کن.';
-        if (!form.targetKind || !form.targetId) return 'مقصد را انتخاب کن.';
-        if (form.sourceKind !== form.targetKind) {
-          return 'انتقال فقط بین دو کیف پول یا بین دو دارایی ممکن است.';
-        }
-        if (form.sourceId === form.targetId) return 'مبدأ و مقصد نباید یکی باشند.';
-        break;
-      case 'INCOME':
-        if (!form.targetKind || !form.targetId) return 'مقصد را انتخاب کن.';
-        if (!form.categoryId) return 'دسته درآمد الزامی است.';
-        break;
-      case 'EXPENSE':
-        if (!form.sourceKind || !form.sourceId) return 'مبدأ را انتخاب کن.';
-        if (!form.categoryId) return 'دسته هزینه الزامی است.';
-        break;
-    }
-
-    const needsSrc = form.type !== 'INCOME';
-    const needsTgt = form.type !== 'EXPENSE';
-    if (needsSrc) {
-      const v = Number(form.sourceAmount);
-      if (!Number.isFinite(v) || v <= 0) return 'مقدار مبدأ نامعتبر است.';
-    }
-    if (needsTgt) {
-      const v = Number(form.targetAmount);
-      if (!Number.isFinite(v) || v <= 0) return 'مقدار مقصد نامعتبر است.';
-    }
-
-    if (shape.needsPrice) {
-      const p = Number(form.priceToman);
-      const u = Number(form.usdRate);
-      if (!Number.isFinite(p) || p <= 0) return 'قیمت واحد (تومان) نامعتبر است.';
-      if (!Number.isFinite(u) || u <= 0) return 'نرخ دلار نامعتبر است.';
-    }
-
-    return null;
-  };
-
-  const buildPayload = (): Record<string, unknown> => {
-    // usd_rate is ONLY meaningful on BUY/SELL because calculate-asset-stats
-    // derives PnL from the legacy `asset_id/amount/price_toman/usd_rate`
-    // columns. Stamping it on other types would fill the DB with values that
-    // no calculation consumes (and that would be the wrong denomination
-    // anyway — transfers need the source currency's rate, not USD's). When
-    // the stats layer is rewritten later, rate snapshotting gets redesigned
-    // properly at the schema level.
-    const base: Record<string, unknown> = {
-      user_id: user.id,
-      type: form.type,
-      date_string: form.date,
-      note: form.note || null,
-      source_wallet_id: null,
-      source_asset_id: null,
-      target_wallet_id: null,
-      target_asset_id: null,
-      source_amount: null,
-      target_amount: null,
-      category_id: null,
-      asset_id: null,
-      amount: null,
-      price_toman: null,
-      usd_rate: null,
-    };
-
-    const setSource = () => {
-      if (form.sourceKind === 'wallet') base.source_wallet_id = form.sourceId;
-      else if (form.sourceKind === 'asset') base.source_asset_id = form.sourceId;
-      base.source_amount = Number(form.sourceAmount);
-    };
-    const setTarget = () => {
-      if (form.targetKind === 'wallet') base.target_wallet_id = form.targetId;
-      else if (form.targetKind === 'asset') base.target_asset_id = form.targetId;
-      base.target_amount = Number(form.targetAmount);
-    };
-
-    switch (form.type) {
-      case 'BUY':
-        setSource();
-        setTarget();
-        base.price_toman = Number(form.priceToman);
-        base.usd_rate = Number(form.usdRate);
-        // Legacy mirror so calculate-asset-stats keeps working.
-        base.asset_id = form.targetId;
-        base.amount = Number(form.targetAmount);
-        break;
-      case 'SELL':
-        setSource();
-        setTarget();
-        base.price_toman = Number(form.priceToman);
-        base.usd_rate = Number(form.usdRate);
-        base.asset_id = form.sourceId;
-        base.amount = Number(form.sourceAmount);
-        break;
-      case 'TRANSFER':
-        setSource();
-        setTarget();
-        break;
-      case 'INCOME':
-        setTarget();
-        base.category_id = form.categoryId;
-        break;
-      case 'EXPENSE':
-        setSource();
-        base.category_id = form.categoryId;
-        break;
-    }
-    return base;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const err = validate();
-    if (err) {
-      alert(err);
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const payload = buildPayload();
-      if (txToEdit) {
-        // Type isn't editable, but we still write all polymorphic fields so the
-        // row matches its current shape exactly.
-        const { data, error } = await supabase
-          .from('transactions')
-          .update(payload)
-          .eq('id', txToEdit.id)
-          .select()
-          .single();
-        if (error) throw error;
-        setTransactions((prev) =>
-          prev.map((t) => (t.id === txToEdit.id ? (data as Transaction) : t))
-        );
-      } else {
-        const { data, error } = await supabase
-          .from('transactions')
-          .insert([payload])
-          .select()
-          .single();
-        if (error) throw error;
-        setTransactions((prev) => [data as Transaction, ...prev]);
-      }
-      router.back();
-    } catch (err2) {
-      console.error(err2);
-      alert('خطا در ثبت تراکنش');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   return (
-    <div className="bg-[#0F1015] min-h-full pb-10 animate-in slide-in-from-bottom-8 duration-300 relative z-50">
-      <div className="sticky top-0 bg-[#161722]/90 backdrop-blur-md px-6 py-4 flex items-center gap-4 border-b border-white/5">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="p-2 -mr-2 bg-white/5 rounded-full text-slate-300 hover:bg-white/10"
-        >
-          <ArrowRight size={20} />
-        </button>
-        <h2 className="text-lg font-bold text-white flex-1">
-          {txToEdit ? 'ویرایش تراکنش' : 'ثبت تراکنش جدید'}
-        </h2>
-      </div>
-
-      <form onSubmit={handleSubmit} className="p-6 space-y-5">
-        <div className="grid grid-cols-5 gap-1 bg-[#1A1B26] p-1 rounded-xl">
-          {TYPE_TABS.map((t) => (
+    <div
+      className={
+        isBulk
+          ? 'rounded-2xl border border-white/5 bg-[#13141C] p-4 space-y-5'
+          : 'space-y-5'
+      }
+    >
+      {isBulk && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-400">
+            تراکنش #{rowIndex + 1}
+          </span>
+          {canRemove && (
             <button
-              key={t.id}
               type="button"
-              onClick={() => switchType(t.id)}
-              disabled={!!txToEdit && t.id !== form.type}
-              className={`py-2 text-xs font-bold rounded-lg transition-all ${
-                form.type === t.id
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200 disabled:opacity-30'
-              }`}
+              onClick={onRemove}
+              className="p-1.5 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-lg text-slate-400 transition-colors"
+              aria-label="حذف این تراکنش"
             >
-              {t.label}
+              <Trash2 size={14} />
             </button>
-          ))}
+          )}
         </div>
-        {txToEdit && (
-          <p className="text-[11px] text-slate-500 -mt-2">
-            نوع تراکنش پس از ثبت قابل تغییر نیست.
-          </p>
-        )}
+      )}
 
-        <FieldDate
-          value={form.date}
-          onChange={(v) => updateField('date', v)}
+      <FieldDate
+        value={form.date}
+        onChange={(v) => updateField('date', v)}
+      />
+
+      {/* Source picker */}
+      {shape.source && (
+        <EndpointPicker
+          label="مبدأ"
+          allow={shape.source}
+          kind={form.sourceKind}
+          id={form.sourceId}
+          wallets={wallets}
+          assets={assets}
+          excludeId={form.sourceKind === form.targetKind ? form.targetId : null}
+          onChange={(kind, id) => {
+            onChange((prev) => {
+              const next = { ...prev, sourceKind: kind, sourceId: id };
+              if (next.type === 'BUY' || next.type === 'SELL') {
+                return recomputeMoneySide(next, wallets, currencyRates, usdRate);
+              }
+              return next;
+            });
+          }}
         />
+      )}
 
-        {/* Source picker */}
-        {shape.source && (
-          <EndpointPicker
-            label="مبدأ"
-            allow={shape.source}
-            kind={form.sourceKind}
-            id={form.sourceId}
-            wallets={wallets}
-            assets={assets}
-            excludeId={form.sourceKind === form.targetKind ? form.targetId : null}
-            onChange={(kind, id) => {
-              setForm((prev) => {
-                const next = { ...prev, sourceKind: kind, sourceId: id };
-                if (next.type === 'BUY' || next.type === 'SELL') {
-                  return recomputeMoneySide(next);
-                }
-                return next;
-              });
-            }}
-          />
-        )}
-
-        {/* Target picker */}
-        {shape.target && (
-          <EndpointPicker
-            label="مقصد"
-            allow={shape.target}
-            kind={form.targetKind}
-            id={form.targetId}
-            wallets={wallets}
-            assets={assets}
-            excludeId={form.sourceKind === form.targetKind ? form.sourceId : null}
-            onChange={(kind, id) => {
-              setForm((prev) => {
-                const next = { ...prev, targetKind: kind, targetId: id };
-                if (next.type === 'BUY' || next.type === 'SELL') {
-                  return recomputeMoneySide(next);
-                }
-                return next;
-              });
-            }}
-          />
-        )}
-
-        {/* Amounts */}
-        <AmountFields
-          form={form}
-          shape={shape}
-          sourceWallet={sourceWallet}
-          targetWallet={targetWallet}
-          sourceAsset={sourceAsset}
-          targetAsset={targetAsset}
-          onSourceAmount={(v) =>
-            form.type === 'TRANSFER'
-              ? onTransferSourceAmountChange(v)
-              : updateField('sourceAmount', v)
-          }
-          onTargetAmount={(v) => updateField('targetAmount', v)}
+      {/* Target picker */}
+      {shape.target && (
+        <EndpointPicker
+          label="مقصد"
+          allow={shape.target}
+          kind={form.targetKind}
+          id={form.targetId}
+          wallets={wallets}
+          assets={assets}
+          excludeId={form.sourceKind === form.targetKind ? form.sourceId : null}
+          onChange={(kind, id) => {
+            onChange((prev) => {
+              const next = { ...prev, targetKind: kind, targetId: id };
+              if (next.type === 'BUY' || next.type === 'SELL') {
+                return recomputeMoneySide(next, wallets, currencyRates, usdRate);
+              }
+              return next;
+            });
+          }}
         />
+      )}
 
-        {shape.needsPrice && (
-          <PriceFields
-            priceToman={form.priceToman}
-            usdRate={form.usdRate}
-            onPriceToman={(v) => updateField('priceToman', v)}
-            onUsdRate={(v) => updateField('usdRate', v)}
-          />
-        )}
+      {/* Amounts */}
+      <AmountFields
+        form={form}
+        shape={shape}
+        sourceWallet={sourceWallet}
+        targetWallet={targetWallet}
+        sourceAsset={sourceAsset}
+        targetAsset={targetAsset}
+        onSourceAmount={(v) =>
+          form.type === 'TRANSFER'
+            ? onTransferSourceAmountChange(v)
+            : updateField('sourceAmount', v)
+        }
+        onTargetAmount={(v) => updateField('targetAmount', v)}
+      />
 
-        {shape.needsCategory && (
-          <CategoryPicker
-            kind={shape.needsCategory}
-            categories={categories}
-            value={form.categoryId}
-            onChange={(v) => updateField('categoryId', v)}
-          />
-        )}
+      {shape.needsPrice && (
+        <PriceFields
+          priceToman={form.priceToman}
+          usdRate={form.usdRate}
+          onPriceToman={(v) => updateField('priceToman', v)}
+          onUsdRate={(v) => updateField('usdRate', v)}
+        />
+      )}
 
-        <div>
-          <label className="block text-xs text-slate-400 mb-1">
-            توضیحات (اختیاری)
-          </label>
-          <textarea
-            value={form.note}
-            onChange={(e) => updateField('note', e.target.value)}
-            className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none min-h-[80px]"
-            maxLength={500}
-          />
-        </div>
+      {shape.needsCategory && (
+        <CategoryPicker
+          kind={shape.needsCategory}
+          categories={categories}
+          value={form.categoryId}
+          onChange={(v) => updateField('categoryId', v)}
+        />
+      )}
 
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.3)] transition-all mt-4 disabled:opacity-50"
-        >
-          {isSubmitting
-            ? 'در حال ارسال...'
-            : txToEdit
-              ? 'ثبت تغییرات'
-              : 'ثبت تراکنش'}
-        </button>
-      </form>
+      <div>
+        <label className="block text-xs text-slate-400 mb-1">
+          توضیحات (اختیاری)
+        </label>
+        <textarea
+          value={form.note}
+          onChange={(e) => updateField('note', e.target.value)}
+          className="w-full bg-[#1A1B26] border border-white/5 rounded-xl p-3 text-white text-sm focus:border-purple-500 outline-none min-h-[80px]"
+          maxLength={500}
+        />
+      </div>
     </div>
   );
 }
