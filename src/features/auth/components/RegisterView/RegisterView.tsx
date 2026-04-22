@@ -18,8 +18,8 @@ export function RegisterView() {
   } = useRegisterView();
 
   return (
-    <div className="bg-[#0F1015] text-slate-200 min-h-screen font-sans flex items-center justify-center p-4 selection:bg-purple-500/30">
-      <div className="w-full max-w-md bg-[#161722] p-8 rounded-3xl border border-white/5 shadow-2xl relative overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+    <div className="bg-[#0F1015] text-slate-200 min-h-screen font-sans flex items-stretch sm:items-center justify-center sm:p-4 selection:bg-purple-500/30">
+      <div className="w-full sm:max-w-md bg-[#161722] p-6 sm:p-8 sm:rounded-3xl sm:border border-white/5 sm:shadow-2xl relative overflow-hidden flex flex-col justify-center sm:block animate-in fade-in sm:zoom-in-95 duration-500">
         <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
         <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -ml-10 -mb-10"></div>
 
