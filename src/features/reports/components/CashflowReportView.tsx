@@ -267,7 +267,7 @@ function TabCard({
           {label}
         </span>
       </div>
-      <span className={`text-lg font-mono font-bold ${
+      <span className={`text-lg  font-bold ${
         active
           ? tone === 'income' ? 'text-emerald-400' : 'text-rose-400'
           : 'text-slate-300'
@@ -400,7 +400,7 @@ function CategoryRow({
               <span className="text-[10px] text-slate-500 mr-1">(جمع زیرشاخه‌ها)</span>
             )}
           </span>
-          <span className={`text-xs font-mono font-bold ${empty ? 'text-slate-500' : textColor}`}>
+          <span className={`text-xs  font-bold ${empty ? 'text-slate-500' : textColor}`}>
             {formatCurrency(displayValue, currencyMode)}
           </span>
         </div>
@@ -411,7 +411,7 @@ function CategoryRow({
               style={{ width: `${Math.min(pct, 100)}%` }}
             />
           </div>
-          <span className="text-[10px] font-mono text-slate-500 shrink-0 w-10 text-left">
+          <span className="text-[10px]  text-slate-500 shrink-0 w-10 text-left">
             {pct.toFixed(1)}٪
           </span>
         </div>
@@ -444,11 +444,11 @@ function UncategorizedRow({
             بدون دسته‌بندی
             <span className="text-[10px] text-slate-500 mr-1">({count} تراکنش)</span>
           </span>
-          <span className={`text-xs font-mono font-bold ${textColor}`}>
+          <span className={`text-xs  font-bold ${textColor}`}>
             {formatCurrency(total, currencyMode)}
           </span>
         </div>
-        <div className="text-[10px] font-mono text-slate-500 mt-0.5">{pct.toFixed(1)}٪</div>
+        <div className="text-[10px]  text-slate-500 mt-0.5">{pct.toFixed(1)}٪</div>
       </div>
     </div>
   );

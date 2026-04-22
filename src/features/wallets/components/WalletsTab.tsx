@@ -102,7 +102,7 @@ export function WalletsTab() {
                     <p className="font-semibold text-slate-200 truncate">
                       {wallet.name}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1 font-mono" dir="ltr">
+                    <p className="text-xs text-slate-500 mt-1 " dir="ltr">
                       {meta.symbol}{' '}
                       {stats.balance.toLocaleString('en-US', {
                         maximumFractionDigits: meta.decimals,

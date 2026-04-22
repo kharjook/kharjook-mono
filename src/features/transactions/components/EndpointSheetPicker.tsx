@@ -135,7 +135,7 @@ export function EndpointSheetPicker({
                   subtitle={`${meta.symbol} ${w.currency}`}
                   right={
                     <span
-                      className="text-xs font-mono text-slate-300"
+                      className="text-xs  text-slate-300"
                       dir="ltr"
                     >
                       {stats.balance.toLocaleString('en-US', {
@@ -168,7 +168,7 @@ export function EndpointSheetPicker({
                   subtitle={a.unit}
                   right={
                     <span
-                      className="text-xs font-mono text-slate-300"
+                      className="text-xs  text-slate-300"
                       dir="ltr"
                     >
                       {holding > 0

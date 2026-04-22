@@ -190,7 +190,7 @@ function CashflowPeriodCard({
           <span className="text-[11px] font-bold text-slate-300">
             {formatCurrentPeriodLabel(kind)}
           </span>
-          <span className={`text-[10px] font-mono ${
+          <span className={`text-[10px]  ${
             net > 0 ? 'text-emerald-400' : net < 0 ? 'text-rose-400' : 'text-slate-500'
           }`}>
             {net > 0 ? '+' : ''}
@@ -263,13 +263,13 @@ function AssetsPeriodCard({
           ) : (
             <TrendingDown size={14} className="text-rose-400" />
           )}
-          <span className={`text-sm font-mono font-bold ${
+          <span className={`text-sm  font-bold ${
             positive ? 'text-emerald-400' : 'text-rose-400'
           }`}>
             {primary > 0 ? '+' : ''}
             {formatCurrency(primary, currencyMode)}
           </span>
-          <span className="text-[10px] font-mono text-slate-500">
+          <span className="text-[10px]  text-slate-500">
             ({secondary > 0 ? '+' : ''}
             {formatCurrency(secondary, secondaryMode)})
           </span>
@@ -305,7 +305,7 @@ function MiniStat({
         {icon}
         <span className="text-[10px] text-slate-500">{label}</span>
       </div>
-      <div className={`text-xs font-mono font-bold ${color}`}>{value}</div>
+      <div className={`text-xs  font-bold ${color}`}>{value}</div>
     </div>
   );
 }

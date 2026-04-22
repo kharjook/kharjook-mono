@@ -184,7 +184,7 @@ export function CurrencyRatesView() {
               <FormattedNumberInput
                 value={local[c]}
                 onValueChange={(canonical) => setOne(c, canonical)}
-                className="w-full bg-[#222436] border border-white/10 rounded-xl p-3 text-white text-sm font-mono outline-none focus:border-purple-500 text-left"
+                className="w-full bg-[#222436] border border-white/10 rounded-xl p-3 text-white text-sm  outline-none focus:border-purple-500 text-left"
                 dir="ltr"
                 placeholder="0"
               />

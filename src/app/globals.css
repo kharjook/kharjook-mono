@@ -9,14 +9,13 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  
 }
 
 html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   /* Prevent iOS rubber-band / pull-to-refresh from showing the browser chrome
      in standalone PWA mode. */
   overscroll-behavior-y: none;
@@ -64,4 +63,11 @@ body {
   body {
     touch-action: manipulation;
   }
+}
+
+
+.ss02 {
+	-moz-font-feature-settings: 'ss02';
+	-webkit-font-feature-settings: 'ss02';
+	font-feature-settings: 'ss02';
 }

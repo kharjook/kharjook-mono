@@ -229,7 +229,7 @@ function TxRow({
           </div>
         </div>
         <div className="text-left shrink-0">
-          <p className={`text-sm font-bold font-mono ${tone}`} dir="ltr">
+          <p className={`text-sm font-bold  ${tone}`} dir="ltr">
             {isIn ? '+' : '-'}
             {meta.symbol} {Math.abs(displayAmount).toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}
           </p>

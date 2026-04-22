@@ -351,11 +351,11 @@ function PnlLine({
         {warn && <AlertCircle size={11} className="text-amber-400" />}
       </div>
       <div className="flex items-baseline gap-2 flex-wrap">
-        <span className={`${sizeCls} font-mono font-bold ${color}`}>
+        <span className={`${sizeCls}  font-bold ${color}`}>
           {primary > 0 ? '+' : ''}
           {formatCurrency(primary, currencyMode)}
         </span>
-        <span className={`text-xs font-mono ${color}`}>
+        <span className={`text-xs  ${color}`}>
           ({secondary > 0 ? '+' : ''}
           {formatCurrency(secondary, secondaryMode)})
         </span>
@@ -415,7 +415,7 @@ function AssetRow({
           </div>
           <div className="text-[10px] text-slate-500">
             موجودی در پایان دوره:{' '}
-            <span className="font-mono text-slate-400">
+            <span className=" text-slate-400">
               {stats.endHoldings.toLocaleString('en-US', {
                 maximumFractionDigits: 6,
               })}{' '}
@@ -425,11 +425,11 @@ function AssetRow({
         </div>
         {hasActivity && (
           <div className="text-left shrink-0">
-            <div className={`text-sm font-mono font-bold ${realizedColor}`}>
+            <div className={`text-sm  font-bold ${realizedColor}`}>
               {realizedPrimary > 0 ? '+' : ''}
               {formatCurrency(realizedPrimary, currencyMode)}
             </div>
-            <div className="text-[10px] font-mono text-slate-500">
+            <div className="text-[10px]  text-slate-500">
               {realizedSecondary > 0 ? '+' : ''}
               {formatCurrency(realizedSecondary, secondaryMode)}
             </div>
@@ -581,15 +581,15 @@ function TradeBox({
         <span className="text-[10px] text-slate-500">{label}</span>
         <span className="text-[10px] text-slate-600 mr-auto">({count})</span>
       </div>
-      <div className="text-xs font-mono text-white">
+      <div className="text-xs  text-white">
         {units.toLocaleString('en-US', { maximumFractionDigits: 6 })}{' '}
         <span className="text-[10px] text-slate-500">{unit}</span>
       </div>
       <div className="text-[10px] text-slate-500 mt-1">میانگین قیمت</div>
-      <div className="text-[11px] font-mono text-slate-300">
+      <div className="text-[11px]  text-slate-300">
         {formatCurrency(primary, currencyMode)}
       </div>
-      <div className="text-[10px] font-mono text-slate-500">
+      <div className="text-[10px]  text-slate-500">
         {formatCurrency(secondary, secondaryMode)}
       </div>
     </div>
@@ -610,8 +610,8 @@ function MiniFact({
   return (
     <div>
       <div className="text-[10px] text-slate-500">{label}</div>
-      <div className="text-xs font-mono font-bold text-white">{main}</div>
-      <div className="text-[10px] font-mono text-slate-500">{sub}</div>
+      <div className="text-xs  font-bold text-white">{main}</div>
+      <div className="text-[10px]  text-slate-500">{sub}</div>
       {hint && (
         <div className="text-[9px] text-amber-400/70 mt-0.5">{hint}</div>
       )}

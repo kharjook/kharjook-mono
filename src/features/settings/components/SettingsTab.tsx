@@ -39,7 +39,7 @@ export function SettingsTab() {
         <div>
           <p className="text-sm text-slate-400">اکانت سوپابیس</p>
           <p
-            className="text-sm font-bold text-white mt-1 font-mono"
+            className="text-sm font-bold text-white mt-1 "
             dir="ltr"
           >
             {latinizeDigits(displayPhone)}

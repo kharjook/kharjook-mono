@@ -15,5 +15,5 @@ export function formatCurrency(
   const sign = val < 0 ? '-' : '';
   return currency === 'USD'
     ? `${sign}$${formatted}`
-    : `${sign}${formatted} ت`;
+    : `${sign}${formatted} تومنء`;
 }

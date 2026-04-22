@@ -1542,7 +1542,7 @@ function DirectionCard({
           {name}
         </p>
         {filled && (
-          <p className={`text-[11px] mt-0.5 font-mono ${insufficient ? 'text-rose-400' : 'text-slate-500'}`} dir="ltr">
+          <p className={`text-[11px] mt-0.5  ${insufficient ? 'text-rose-400' : 'text-slate-500'}`} dir="ltr">
             {balance != null
               ? `${balance.toLocaleString('en-US', { maximumFractionDigits: wallet ? CURRENCY_META[wallet.currency].decimals : 6 })} ${unit.trim()}`
               : unit}
@@ -1627,7 +1627,7 @@ function PrimaryAmountField({
       <FormattedNumberInput
         value={value}
         onValueChange={onChange}
-        className={`w-full bg-[#1A1B26] border rounded-xl p-3 text-sm font-mono focus:outline-none text-left ${
+        className={`w-full bg-[#1A1B26] border rounded-xl p-3 text-sm  focus:outline-none text-left ${
           showError
             ? 'border-rose-500/50 text-rose-200 focus:border-rose-500'
             : 'border-white/10 text-white focus:border-purple-500'
@@ -1674,7 +1674,7 @@ function DerivedAmountLine({
       </label>
       <div
         key={value || 'empty'}
-        className="w-full bg-white/2 border border-dashed border-white/10 rounded-xl p-3 text-sm font-mono text-left text-slate-300 animate-in fade-in zoom-in-95 duration-300"
+        className="w-full bg-white/2 border border-dashed border-white/10 rounded-xl p-3 text-sm  text-left text-slate-300 animate-in fade-in zoom-in-95 duration-300"
         dir="ltr"
       >
         {display}
@@ -1702,7 +1702,7 @@ function CrossCurrencyTargetField({
       <FormattedNumberInput
         value={value}
         onValueChange={onChange}
-        className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
+        className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm  focus:border-purple-500 outline-none text-left"
         dir="ltr"
         required
       />
@@ -1732,7 +1732,7 @@ function PriceFields({
         <FormattedNumberInput
           value={priceToman}
           onValueChange={onPriceToman}
-          className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
+          className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm  focus:border-purple-500 outline-none text-left"
           dir="ltr"
           required
         />
@@ -1743,7 +1743,7 @@ function PriceFields({
           <FormattedNumberInput
             value={usdRate}
             onValueChange={onUsdRate}
-            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm font-mono focus:border-purple-500 outline-none text-left"
+            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm  focus:border-purple-500 outline-none text-left"
             dir="ltr"
             required
           />
@@ -1993,7 +1993,7 @@ function BulkTotalsStrip({
         const net = inflow - outflow;
         const sym = CURRENCY_META[cur as keyof typeof CURRENCY_META]?.symbol ?? '';
         return (
-          <div key={cur} className="flex justify-between text-[11px] text-slate-400 font-mono" dir="ltr">
+          <div key={cur} className="flex justify-between text-[11px] text-slate-400 " dir="ltr">
             <span>{cur}</span>
             <span>
               {inflow > 0 && <span className="text-emerald-400">+{inflow.toLocaleString('en-US', { maximumFractionDigits: 4 })} </span>}

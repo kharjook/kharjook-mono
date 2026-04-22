@@ -68,7 +68,7 @@ export default function RootLayout({
     <html
       lang="fa"
       dir="rtl"
-      className={`${iranSansX.variable} h-full antialiased`}
+      className={`${iranSansX.variable} h-full antialiased ss02`}
     >
       <body className="min-h-full flex flex-col font-sans">
         {children}

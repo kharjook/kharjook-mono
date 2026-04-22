@@ -298,7 +298,7 @@ export function DailyPricesView() {
           <FormattedNumberInput
             value={localUsd}
             onValueChange={handleUsdRateChange}
-            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-left font-mono focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
+            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-left  focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition-all"
             dir="ltr"
           />
           <p className="text-[11px] text-purple-300/60 mt-2">

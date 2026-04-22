@@ -52,7 +52,7 @@ export function RegisterView() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all font-mono"
+                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all "
                 dir="ltr"
                 autoComplete="email"
                 required
@@ -72,7 +72,7 @@ export function RegisterView() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all font-mono tracking-widest"
+                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all  tracking-widest"
                 dir="ltr"
                 autoComplete="new-password"
                 minLength={6}
@@ -93,7 +93,7 @@ export function RegisterView() {
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all font-mono tracking-widest"
+                className="w-full bg-[#1A1B26] border border-white/5 rounded-xl py-3 px-4 pl-10 text-white text-left focus:border-purple-500 outline-none transition-all  tracking-widest"
                 dir="ltr"
                 autoComplete="new-password"
                 minLength={6}
