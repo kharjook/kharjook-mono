@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity } from 'lucide-react';
+import { Activity, Plus } from 'lucide-react';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import type { Asset, Category } from '@/shared/types/domain';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
@@ -44,24 +44,32 @@ export function AssetsTab() {
   }, [assets, categories]);
 
   return (
-    <div className="p-6 animate-in fade-in duration-300">
-      <div className="flex justify-between items-center mb-6">
+    <div className="p-6 animate-in fade-in duration-300 space-y-6">
+      <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-white">لیست دارایی‌ها</h2>
       </div>
 
-      {isLoadingData && (
+      {isLoadingData && assets.length === 0 && (
         <div className="text-center text-slate-500 py-10 animate-pulse">
           در حال دریافت...
         </div>
       )}
 
       {!isLoadingData && assets.length === 0 && (
-        <div className="text-center text-slate-500 text-sm py-10">
-          هیچ دارایی یافت نشد.
+        <div className="text-center py-10 space-y-3">
+          <p className="text-slate-500 text-sm">هنوز دارایی‌ای نساخته‌ای.</p>
+          <button
+            type="button"
+            onClick={() => router.push('/manage/assets')}
+            className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 text-sm font-medium"
+          >
+            <Plus size={16} />
+            افزودن دارایی
+          </button>
         </div>
       )}
 
-      {!isLoadingData && (
+      {assets.length > 0 && (
         <div className="space-y-8">
           {groupedAssets.map((group) => (
             <div key={group.id} className="space-y-3">
