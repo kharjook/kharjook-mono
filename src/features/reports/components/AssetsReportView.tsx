@@ -13,6 +13,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
+import type { CurrencyMode } from '@/shared/types/domain';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import {
@@ -40,7 +41,7 @@ export function AssetsReportView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { assets, transactions, dailyPrices } = useData();
-  const { usdRate } = useUI();
+  const { usdRate, currencyMode } = useUI();
 
   const period = useMemo(
     () => decodePeriodParams(searchParams.get('period'), searchParams.get('d')),
@@ -183,6 +184,7 @@ export function AssetsReportView() {
           buyCount={totals.buyCount}
           sellCount={totals.sellCount}
           periodEndLabel={periodEndLabel}
+          currencyMode={currencyMode}
         />
 
         {sorted.length === 0 ? (
@@ -193,7 +195,7 @@ export function AssetsReportView() {
         ) : (
           <div className="space-y-2">
             {sorted.map(({ asset, stats }) => (
-              <AssetRow key={asset.id} asset={asset} stats={stats} />
+              <AssetRow key={asset.id} asset={asset} stats={stats} currencyMode={currencyMode} />
             ))}
           </div>
         )}
@@ -260,6 +262,7 @@ function SummaryCard({
   buyCount,
   sellCount,
   periodEndLabel,
+  currencyMode,
 }: {
   realizedToman: number;
   realizedUsd: number;
@@ -269,6 +272,7 @@ function SummaryCard({
   buyCount: number;
   sellCount: number;
   periodEndLabel: string;
+  currencyMode: CurrencyMode;
 }) {
   return (
     <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4 space-y-3">
@@ -284,6 +288,7 @@ function SummaryCard({
         usd={realizedUsd}
         tip="از تراکنش‌های فروش انجام‌شده در این دوره"
         size="lg"
+        currencyMode={currencyMode}
       />
       <div className="border-t border-white/5" />
       <PnlLine
@@ -297,6 +302,7 @@ function SummaryCard({
         }
         size="md"
         warn={unrealizedMissingCount > 0}
+        currencyMode={currencyMode}
       />
     </div>
   );
@@ -309,6 +315,7 @@ function PnlLine({
   tip,
   size,
   warn,
+  currencyMode,
 }: {
   label: string;
   toman: number;
@@ -316,10 +323,17 @@ function PnlLine({
   tip: string;
   size: 'lg' | 'md';
   warn?: boolean;
+  currencyMode: CurrencyMode;
 }) {
-  const positive = toman >= 0;
+  // Pivot primary/secondary based on the global currency toggle so the
+  // dominant number always matches the user's chosen perspective.
+  const primary = currencyMode === 'USD' ? usd : toman;
+  const secondary = currencyMode === 'USD' ? toman : usd;
+  const secondaryMode: CurrencyMode = currencyMode === 'USD' ? 'TOMAN' : 'USD';
+
+  const positive = primary >= 0;
   const color =
-    toman === 0
+    primary === 0
       ? 'text-slate-300'
       : positive
         ? 'text-emerald-400'
@@ -328,7 +342,7 @@ function PnlLine({
   return (
     <div>
       <div className="flex items-center gap-1.5 mb-1">
-        {toman >= 0 ? (
+        {primary >= 0 ? (
           <TrendingUp size={14} className="text-emerald-400" />
         ) : (
           <TrendingDown size={14} className="text-rose-400" />
@@ -338,12 +352,12 @@ function PnlLine({
       </div>
       <div className="flex items-baseline gap-2 flex-wrap">
         <span className={`${sizeCls} font-mono font-bold ${color}`}>
-          {toman > 0 ? '+' : ''}
-          {formatCurrency(toman, 'TOMAN')}
+          {primary > 0 ? '+' : ''}
+          {formatCurrency(primary, currencyMode)}
         </span>
         <span className={`text-xs font-mono ${color}`}>
-          ({usd > 0 ? '+' : ''}
-          {formatCurrency(usd, 'USD')})
+          ({secondary > 0 ? '+' : ''}
+          {formatCurrency(secondary, secondaryMode)})
         </span>
       </div>
       <p className="text-[10px] text-slate-500 mt-0.5">{tip}</p>
@@ -351,11 +365,22 @@ function PnlLine({
   );
 }
 
-function AssetRow({ asset, stats }: { asset: Asset; stats: AssetPeriodStats }) {
+function AssetRow({
+  asset,
+  stats,
+  currencyMode,
+}: {
+  asset: Asset;
+  stats: AssetPeriodStats;
+  currencyMode: CurrencyMode;
+}) {
   const hasActivity = stats.hadActivity;
-  const realizedPositive = stats.realizedToman >= 0;
+  const realizedPrimary = currencyMode === 'USD' ? stats.realizedUsd : stats.realizedToman;
+  const realizedSecondary = currencyMode === 'USD' ? stats.realizedToman : stats.realizedUsd;
+  const secondaryMode: CurrencyMode = currencyMode === 'USD' ? 'TOMAN' : 'USD';
+  const realizedPositive = realizedPrimary >= 0;
   const realizedColor =
-    stats.realizedToman === 0
+    realizedPrimary === 0
       ? 'text-slate-500'
       : realizedPositive
         ? 'text-emerald-400'
@@ -401,12 +426,12 @@ function AssetRow({ asset, stats }: { asset: Asset; stats: AssetPeriodStats }) {
         {hasActivity && (
           <div className="text-left shrink-0">
             <div className={`text-sm font-mono font-bold ${realizedColor}`}>
-              {stats.realizedToman > 0 ? '+' : ''}
-              {formatCurrency(stats.realizedToman, 'TOMAN')}
+              {realizedPrimary > 0 ? '+' : ''}
+              {formatCurrency(realizedPrimary, currencyMode)}
             </div>
             <div className="text-[10px] font-mono text-slate-500">
-              {stats.realizedUsd > 0 ? '+' : ''}
-              {formatCurrency(stats.realizedUsd, 'USD')}
+              {realizedSecondary > 0 ? '+' : ''}
+              {formatCurrency(realizedSecondary, secondaryMode)}
             </div>
           </div>
         )}
@@ -423,6 +448,7 @@ function AssetRow({ asset, stats }: { asset: Asset; stats: AssetPeriodStats }) {
             avgUsd={stats.bought.avgPriceUsd}
             count={stats.bought.count}
             empty={stats.bought.units === 0}
+            currencyMode={currencyMode}
           />
           <TradeBox
             icon={<ArrowUp size={12} className="text-rose-400" />}
@@ -433,6 +459,7 @@ function AssetRow({ asset, stats }: { asset: Asset; stats: AssetPeriodStats }) {
             avgUsd={stats.sold.avgPriceUsd}
             count={stats.sold.count}
             empty={stats.sold.units === 0}
+            currencyMode={currencyMode}
           />
         </div>
       ) : (
@@ -445,46 +472,60 @@ function AssetRow({ asset, stats }: { asset: Asset; stats: AssetPeriodStats }) {
         <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
           <MiniFact
             label="میانگین قیمت خرید (پایان دوره)"
-            main={formatCurrency(stats.endAvgCostToman, 'TOMAN')}
-            sub={formatCurrency(stats.endAvgCostUsd, 'USD')}
+            main={formatCurrency(
+              currencyMode === 'USD' ? stats.endAvgCostUsd : stats.endAvgCostToman,
+              currencyMode
+            )}
+            sub={formatCurrency(
+              currencyMode === 'USD' ? stats.endAvgCostToman : stats.endAvgCostUsd,
+              secondaryMode
+            )}
           />
           {stats.unrealizedAvailable ? (
-            <MiniFact
-              label="سود/زیان باز"
-              main={
-                <span
-                  className={
-                    stats.unrealizedToman > 0
-                      ? 'text-emerald-400'
-                      : stats.unrealizedToman < 0
-                        ? 'text-rose-400'
-                        : 'text-slate-400'
+            (() => {
+              const unrealizedPrimary =
+                currencyMode === 'USD' ? stats.unrealizedUsd : stats.unrealizedToman;
+              const unrealizedSecondary =
+                currencyMode === 'USD' ? stats.unrealizedToman : stats.unrealizedUsd;
+              return (
+                <MiniFact
+                  label="سود/زیان باز"
+                  main={
+                    <span
+                      className={
+                        unrealizedPrimary > 0
+                          ? 'text-emerald-400'
+                          : unrealizedPrimary < 0
+                            ? 'text-rose-400'
+                            : 'text-slate-400'
+                      }
+                    >
+                      {unrealizedPrimary > 0 ? '+' : ''}
+                      {formatCurrency(unrealizedPrimary, currencyMode)}
+                    </span>
                   }
-                >
-                  {stats.unrealizedToman > 0 ? '+' : ''}
-                  {formatCurrency(stats.unrealizedToman, 'TOMAN')}
-                </span>
-              }
-              sub={
-                <span
-                  className={
-                    stats.unrealizedUsd > 0
-                      ? 'text-emerald-400'
-                      : stats.unrealizedUsd < 0
-                        ? 'text-rose-400'
-                        : 'text-slate-400'
+                  sub={
+                    <span
+                      className={
+                        unrealizedSecondary > 0
+                          ? 'text-emerald-400'
+                          : unrealizedSecondary < 0
+                            ? 'text-rose-400'
+                            : 'text-slate-400'
+                      }
+                    >
+                      {unrealizedSecondary > 0 ? '+' : ''}
+                      {formatCurrency(unrealizedSecondary, secondaryMode)}
+                    </span>
                   }
-                >
-                  {stats.unrealizedUsd > 0 ? '+' : ''}
-                  {formatCurrency(stats.unrealizedUsd, 'USD')}
-                </span>
-              }
-              hint={
-                staleHint && !stats.periodEndPriceIsLive
-                  ? `قیمت: ${formatJalaaliHuman(parseJalaali(staleHint)!)}`
-                  : undefined
-              }
-            />
+                  hint={
+                    staleHint && !stats.periodEndPriceIsLive
+                      ? `قیمت: ${formatJalaaliHuman(parseJalaali(staleHint)!)}`
+                      : undefined
+                  }
+                />
+              );
+            })()
           ) : (
             <MiniFact
               label="سود/زیان باز"
@@ -516,6 +557,7 @@ function TradeBox({
   avgUsd,
   count,
   empty,
+  currencyMode,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -525,7 +567,11 @@ function TradeBox({
   avgUsd: number;
   count: number;
   empty: boolean;
+  currencyMode: CurrencyMode;
 }) {
+  const primary = currencyMode === 'USD' ? avgUsd : avgToman;
+  const secondary = currencyMode === 'USD' ? avgToman : avgUsd;
+  const secondaryMode: CurrencyMode = currencyMode === 'USD' ? 'TOMAN' : 'USD';
   return (
     <div
       className={`bg-white/2 border border-white/5 rounded-xl p-2.5 ${empty ? 'opacity-50' : ''}`}
@@ -541,10 +587,10 @@ function TradeBox({
       </div>
       <div className="text-[10px] text-slate-500 mt-1">میانگین قیمت</div>
       <div className="text-[11px] font-mono text-slate-300">
-        {formatCurrency(avgToman, 'TOMAN')}
+        {formatCurrency(primary, currencyMode)}
       </div>
       <div className="text-[10px] font-mono text-slate-500">
-        {formatCurrency(avgUsd, 'USD')}
+        {formatCurrency(secondary, secondaryMode)}
       </div>
     </div>
   );

@@ -2,15 +2,23 @@
  * Per-asset P/L for a Jalali period.
  *
  * Model:
- *  - Replay every BUY/SELL for the asset in chronological order so the
- *    running average cost-basis reflects all prior activity — we can't
- *    compute realized P/L on period sells without the cost basis they
- *    drain.
+ *  - Replay every asset-touching tx (BUY/SELL and asset-side
+ *    INCOME/EXPENSE) in chronological order so the running average
+ *    cost-basis reflects all prior activity — we can't compute
+ *    realized P/L on period sells without the cost basis they drain.
+ *  - Asset-side INCOME is treated as a BUY: new units enter the book
+ *    at the user-provided `price_toman` (market at receipt). That's
+ *    the only honest cost basis we can establish without separate
+ *    "received-for-free" semantics.
+ *  - Asset-side EXPENSE is treated as a SELL: units leave the book at
+ *    the user-provided `price_toman`, realizing P/L against the
+ *    running average cost (units × (price − avgCost)). Same math in
+ *    USD using each tx's own `usd_rate`.
  *  - A SELL charges against the running average cost; realized P/L
  *    = units sold × (sell price − avg cost). Same math in USD using each
  *    tx's own `usd_rate` (falling back to today's rate only if missing).
  *  - Avg buy/sell *for the period* is quantity-weighted over txs dated
- *    inside the period.
+ *    inside the period. INCOME rolls into `bought`; EXPENSE into `sold`.
  *  - Unrealized P/L is marked to the PRICE-AT-PERIOD-END, not the live
  *    price. The caller must resolve that via `effectivePriceAt` (see
  *    `price-history.ts`) and pass it in. When the caller has no price
@@ -118,19 +126,39 @@ function finalizeSide(s: SideAggregate): void {
   s.avgPriceUsd = s.units > 0 ? s.totalUsd / s.units : 0;
 }
 
-/** Pull amount/price from polymorphic columns with legacy fallback. */
+/**
+ * Normalize the cost-basis / proceeds side of any asset-touching tx into
+ * unified `(amount, priceToman, priceUsd)`. Handles:
+ *   - BUY / SELL (legacy + polymorphic columns)
+ *   - Asset-side INCOME (target_asset_id populated)
+ *   - Asset-side EXPENSE (source_asset_id populated)
+ *
+ * For new asset-side INCOME/EXPENSE, `buildPayload` also fills the
+ * legacy `amount`, `price_toman`, `usd_rate` columns so this function
+ * doesn't need type-specific branching. If either value is missing or
+ * non-positive, we return null and the caller skips the row — a silent
+ * drop is preferable to fabricating numbers.
+ */
 function readTrade(
   tx: Transaction,
   usdRateFallback: number
 ): { amount: number; priceToman: number; priceUsd: number } | null {
-  const amount = Number(
-    tx.amount ?? (tx.type === 'BUY' ? tx.target_amount : tx.source_amount)
-  );
+  const polyAmount =
+    tx.type === 'BUY' || tx.type === 'INCOME'
+      ? tx.target_amount
+      : tx.source_amount;
+  const amount = Number(tx.amount ?? polyAmount);
+
   let priceToman = Number(tx.price_toman);
   if (!Number.isFinite(priceToman) || priceToman <= 0) {
-    const money = Number(tx.type === 'BUY' ? tx.source_amount : tx.target_amount);
-    if (Number.isFinite(money) && money > 0 && Number.isFinite(amount) && amount > 0) {
-      priceToman = money / amount;
+    // Only BUY/SELL can derive priceToman from the counterparty wallet
+    // amount — INCOME/EXPENSE have no wallet counterparty on the asset
+    // side, so they MUST carry `price_toman`.
+    if (tx.type === 'BUY' || tx.type === 'SELL') {
+      const money = Number(tx.type === 'BUY' ? tx.source_amount : tx.target_amount);
+      if (Number.isFinite(money) && money > 0 && Number.isFinite(amount) && amount > 0) {
+        priceToman = money / amount;
+      }
     }
   }
   if (!Number.isFinite(amount) || amount <= 0) return null;
@@ -138,6 +166,31 @@ function readTrade(
   const rate = Number(tx.usd_rate) > 0 ? Number(tx.usd_rate) : usdRateFallback;
   if (!(rate > 0)) return null;
   return { amount, priceToman, priceUsd: priceToman / rate };
+}
+
+/**
+ * True when a tx adds units to the asset's book (BUY or asset-side
+ * INCOME with the asset as target). Asset-side INCOME from `buildPayload`
+ * also writes `asset_id` = target.
+ */
+function isAcquireForAsset(tx: Transaction, assetId: string): boolean {
+  if (tx.type === 'BUY') {
+    return tx.asset_id === assetId || tx.target_asset_id === assetId;
+  }
+  if (tx.type === 'INCOME') {
+    return tx.target_asset_id === assetId || tx.asset_id === assetId;
+  }
+  return false;
+}
+
+function isDisposeForAsset(tx: Transaction, assetId: string): boolean {
+  if (tx.type === 'SELL') {
+    return tx.asset_id === assetId || tx.source_asset_id === assetId;
+  }
+  if (tx.type === 'EXPENSE') {
+    return tx.source_asset_id === assetId || tx.asset_id === assetId;
+  }
+  return false;
 }
 
 export function calculateAssetPeriodStats(
@@ -153,24 +206,28 @@ export function calculateAssetPeriodStats(
    */
   periodEndPrice: EffectivePrice | null
 ): AssetPeriodStats {
-  // Filter to asset's BUY/SELL txs, supporting both the legacy `asset_id`
-  // column and the polymorphic endpoints.
+  // Filter to every asset-touching tx: BUY/SELL plus asset-side
+  // INCOME/EXPENSE (which `buildPayload` writes with `asset_id`, `amount`,
+  // `price_toman`, `usd_rate` populated so the replay math is uniform).
   const assetTxs = transactions.filter((tx) => {
-    if (tx.type !== 'BUY' && tx.type !== 'SELL') return false;
-    if (tx.asset_id === asset.id) return true;
-    if (tx.type === 'BUY' && tx.target_asset_id === asset.id) return true;
-    if (tx.type === 'SELL' && tx.source_asset_id === asset.id) return true;
+    if (isAcquireForAsset(tx, asset.id)) return true;
+    if (isDisposeForAsset(tx, asset.id)) return true;
     return false;
   });
+
+  const acquireRank = (tx: Transaction) =>
+    isAcquireForAsset(tx, asset.id) ? 0 : 1;
 
   const sorted = [...assetTxs].sort((a, b) => {
     const da = parseDateToNumber(a.date_string);
     const db = parseDateToNumber(b.date_string);
     if (da !== db) return da - db;
-    // Same-day convention: BUY before SELL so a same-day buy-then-sell
+    // Same-day convention: acquisitions (BUY / asset-INCOME) before
+    // disposals (SELL / asset-EXPENSE) so a same-day buy-then-sell
     // cost-bases correctly.
-    if (a.type === 'BUY' && b.type !== 'BUY') return -1;
-    if (a.type !== 'BUY' && b.type === 'BUY') return 1;
+    const ra = acquireRank(a);
+    const rb = acquireRank(b);
+    if (ra !== rb) return ra - rb;
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
 
@@ -201,8 +258,9 @@ export function calculateAssetPeriodStats(
     }
 
     const inPeriod = isInPeriod(tx.date_string, period);
+    const isAcquire = isAcquireForAsset(tx, asset.id);
 
-    if (tx.type === 'BUY') {
+    if (isAcquire) {
       units += amount;
       costToman += amount * priceToman;
       costUsd += amount * priceUsd;

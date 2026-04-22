@@ -15,6 +15,7 @@ import {
   Wallet as WalletIcon,
 } from 'lucide-react';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
+import type { CurrencyMode } from '@/shared/types/domain';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import {
   currentPeriod,
@@ -28,23 +29,23 @@ import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period
 
 export function ReportsIndexView() {
   const router = useRouter();
-  const { transactions, categories, wallets, currencyRates, assets } = useData();
-  const { usdRate } = useUI();
+  const { transactions, categories, wallets, assets } = useData();
+  const { usdRate, currencyMode } = useUI();
 
   const cashflowByPeriod = useMemo(() => {
     return PERIOD_KINDS.map((kind) => {
       const period = currentPeriod(kind);
       const income = rollupCategories({
-        transactions, categories, wallets, currencyRates,
-        period, kind: 'income', walletId: null,
+        transactions, categories, wallets,
+        period, kind: 'income', walletId: null, currencyMode,
       }).total;
       const expense = rollupCategories({
-        transactions, categories, wallets, currencyRates,
-        period, kind: 'expense', walletId: null,
+        transactions, categories, wallets,
+        period, kind: 'expense', walletId: null, currencyMode,
       }).total;
       return { kind, income, expense };
     });
-  }, [transactions, categories, wallets, currencyRates]);
+  }, [transactions, categories, wallets, currencyMode]);
 
   // Index cards only surface REALIZED P/L (which depends on actual trade
   // prices, not end-of-period prices). Passing `null` for the period-end
@@ -112,6 +113,7 @@ export function ReportsIndexView() {
                 kind={kind}
                 income={income}
                 expense={expense}
+                currencyMode={currencyMode}
               />
             ))}
           </div>
@@ -133,6 +135,7 @@ export function ReportsIndexView() {
                 realizedUsd={realizedUsd}
                 buyCount={buyCount}
                 sellCount={sellCount}
+                currencyMode={currencyMode}
               />
             ))}
           </div>
@@ -166,10 +169,12 @@ function CashflowPeriodCard({
   kind,
   income,
   expense,
+  currencyMode,
 }: {
   kind: PeriodKind;
   income: number;
   expense: number;
+  currencyMode: CurrencyMode;
 }) {
   const { period, d } = encodePeriodParams(currentPeriod(kind));
   const href = `/reports/cashflow?period=${period}&d=${d}`;
@@ -189,21 +194,21 @@ function CashflowPeriodCard({
             net > 0 ? 'text-emerald-400' : net < 0 ? 'text-rose-400' : 'text-slate-500'
           }`}>
             {net > 0 ? '+' : ''}
-            {formatCurrency(net, 'TOMAN')}
+            {formatCurrency(net, currencyMode)}
           </span>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <MiniStat
             icon={<ArrowDownCircle size={12} className="text-emerald-400" />}
             label="درآمد"
-            value={formatCurrency(income, 'TOMAN')}
+            value={formatCurrency(income, currencyMode)}
             tone="income"
             empty={income === 0}
           />
           <MiniStat
             icon={<ArrowUpCircle size={12} className="text-rose-400" />}
             label="هزینه"
-            value={formatCurrency(expense, 'TOMAN')}
+            value={formatCurrency(expense, currencyMode)}
             tone="expense"
             empty={expense === 0}
           />
@@ -220,16 +225,23 @@ function AssetsPeriodCard({
   realizedUsd,
   buyCount,
   sellCount,
+  currencyMode,
 }: {
   kind: PeriodKind;
   realizedToman: number;
   realizedUsd: number;
   buyCount: number;
   sellCount: number;
+  currencyMode: CurrencyMode;
 }) {
   const { period, d } = encodePeriodParams(currentPeriod(kind));
   const href = `/reports/assets?period=${period}&d=${d}`;
-  const positive = realizedToman >= 0;
+  // Primary / secondary values swap with the global toggle so the card's
+  // dominant line matches the active currency.
+  const primary = currencyMode === 'USD' ? realizedUsd : realizedToman;
+  const secondary = currencyMode === 'USD' ? realizedToman : realizedUsd;
+  const secondaryMode: CurrencyMode = currencyMode === 'USD' ? 'TOMAN' : 'USD';
+  const positive = primary >= 0;
 
   return (
     <Link
@@ -254,12 +266,12 @@ function AssetsPeriodCard({
           <span className={`text-sm font-mono font-bold ${
             positive ? 'text-emerald-400' : 'text-rose-400'
           }`}>
-            {realizedToman > 0 ? '+' : ''}
-            {formatCurrency(realizedToman, 'TOMAN')}
+            {primary > 0 ? '+' : ''}
+            {formatCurrency(primary, currencyMode)}
           </span>
           <span className="text-[10px] font-mono text-slate-500">
-            ({realizedUsd > 0 ? '+' : ''}
-            {formatCurrency(realizedUsd, 'USD')})
+            ({secondary > 0 ? '+' : ''}
+            {formatCurrency(secondary, secondaryMode)})
           </span>
         </div>
         <p className="text-[10px] text-slate-500 mt-0.5">سود/زیان محقق‌شده</p>

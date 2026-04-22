@@ -7,6 +7,11 @@ export function calculateAssetStats(
   _currencyMode: CurrencyMode,
   usdRate: number
 ): AssetStats {
+  // Asset-side INCOME/EXPENSE also carry `asset_id` (see `buildPayload`),
+  // so this single predicate captures all four tx shapes that move the
+  // asset's book: BUY/SELL + asset-side INCOME/EXPENSE. INCOME is treated
+  // as an acquisition at `price_toman` (market at receipt). EXPENSE is a
+  // disposal identical to SELL for cost-basis / realized-P&L purposes.
   const assetTxs = transactions.filter((tx) => tx.asset_id === asset.id);
 
   let totalAmount = 0;
@@ -16,6 +21,9 @@ export function calculateAssetStats(
   let realizedProfitUsd = 0;
   let historicalCostToman = 0; // Used for accurate ROI percentage
 
+  const isAcquireType = (t: Transaction['type']) => t === 'BUY' || t === 'INCOME';
+  const isDisposeType = (t: Transaction['type']) => t === 'SELL' || t === 'EXPENSE';
+
   // Bulletproof sort: Oldest to Newest, handling same-day trades logically
   const sortedTxs = [...assetTxs].sort((a, b) => {
     const dateA = parseDateToNumber(a.date_string);
@@ -23,23 +31,27 @@ export function calculateAssetStats(
 
     if (dateA !== dateB) return dateA - dateB;
 
-    // If exact same date, process BUYS before SELLS to avoid phantom zero balances
-    if (a.type === 'BUY' && b.type !== 'BUY') return -1;
-    if (a.type !== 'BUY' && b.type === 'BUY') return 1;
+    // If exact same date, process acquisitions before disposals to avoid
+    // phantom zero balances.
+    const ra = isAcquireType(a.type) ? 0 : 1;
+    const rb = isAcquireType(b.type) ? 0 : 1;
+    if (ra !== rb) return ra - rb;
 
     // Final fallback to real creation timestamp
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
 
   sortedTxs.forEach((tx) => {
-    if (tx.type !== 'BUY' && tx.type !== 'SELL') return;
+    if (!isAcquireType(tx.type) && !isDisposeType(tx.type)) return;
 
     const amount = Number(tx.amount);
     const priceToman = Number(tx.price_toman);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    if (!Number.isFinite(priceToman) || priceToman <= 0) return;
     const txUsdRate = Number(tx.usd_rate) || usdRate;
     const priceUsd = priceToman / txUsdRate;
 
-    if (tx.type === 'BUY') {
+    if (isAcquireType(tx.type)) {
       totalAmount += amount;
       const txCostToman = amount * priceToman;
       totalCostToman += txCostToman;

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
+  AlertCircle,
   ArrowDownCircle,
   ArrowUpCircle,
   ChevronDown,
@@ -10,7 +11,8 @@ import {
   FolderOpen,
   WalletIcon,
 } from 'lucide-react';
-import { useData } from '@/features/portfolio/PortfolioProvider';
+import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
+import type { CurrencyMode } from '@/shared/types/domain';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import {
   decodePeriodParams,
@@ -30,7 +32,8 @@ type Tab = CashflowKind;
 export function CashflowReportView() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { transactions, categories, wallets, currencyRates } = useData();
+  const { transactions, categories, wallets } = useData();
+  const { currencyMode } = useUI();
 
   const period = useMemo(
     () => decodePeriodParams(searchParams.get('period'), searchParams.get('d')),
@@ -61,18 +64,18 @@ export function CashflowReportView() {
   const incomeRollup = useMemo(
     () =>
       rollupCategories({
-        transactions, categories, wallets, currencyRates,
-        period, kind: 'income', walletId,
+        transactions, categories, wallets,
+        period, kind: 'income', walletId, currencyMode,
       }),
-    [transactions, categories, wallets, currencyRates, period, walletId]
+    [transactions, categories, wallets, period, walletId, currencyMode]
   );
   const expenseRollup = useMemo(
     () =>
       rollupCategories({
-        transactions, categories, wallets, currencyRates,
-        period, kind: 'expense', walletId,
+        transactions, categories, wallets,
+        period, kind: 'expense', walletId, currencyMode,
       }),
-    [transactions, categories, wallets, currencyRates, period, walletId]
+    [transactions, categories, wallets, period, walletId, currencyMode]
   );
 
   const active = tab === 'income' ? incomeRollup : expenseRollup;
@@ -114,6 +117,7 @@ export function CashflowReportView() {
           onChange={setTab}
           incomeTotal={incomeRollup.total}
           expenseTotal={expenseRollup.total}
+          currencyMode={currencyMode}
         />
 
         <CategoryList
@@ -121,7 +125,19 @@ export function CashflowReportView() {
           tab={tab}
           expanded={expanded}
           onToggle={toggle}
+          currencyMode={currencyMode}
         />
+
+        {active.unpricedCount > 0 && (
+          <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5">
+            <AlertCircle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-amber-200 leading-relaxed">
+              {active.unpricedCount.toLocaleString('fa-IR')} تراکنش بدون
+              قیمت لحظه‌ای ثبت شده و در جمع لحاظ نشده. ویرایش و ثبت
+              قیمت تا سود/زیان دقیق محاسبه شود.
+            </p>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -185,11 +201,13 @@ function TabSwitcher({
   onChange,
   incomeTotal,
   expenseTotal,
+  currencyMode,
 }: {
   tab: Tab;
   onChange: (t: Tab) => void;
   incomeTotal: number;
   expenseTotal: number;
+  currencyMode: CurrencyMode;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -200,6 +218,7 @@ function TabSwitcher({
         label="درآمد"
         value={incomeTotal}
         tone="income"
+        currencyMode={currencyMode}
       />
       <TabCard
         active={tab === 'expense'}
@@ -208,6 +227,7 @@ function TabSwitcher({
         label="هزینه"
         value={expenseTotal}
         tone="expense"
+        currencyMode={currencyMode}
       />
     </div>
   );
@@ -220,6 +240,7 @@ function TabCard({
   label,
   value,
   tone,
+  currencyMode,
 }: {
   active: boolean;
   onClick: () => void;
@@ -227,6 +248,7 @@ function TabCard({
   label: string;
   value: number;
   tone: 'income' | 'expense';
+  currencyMode: CurrencyMode;
 }) {
   const activeRing = tone === 'income'
     ? 'border-emerald-500/40 bg-emerald-500/5'
@@ -250,7 +272,7 @@ function TabCard({
           ? tone === 'income' ? 'text-emerald-400' : 'text-rose-400'
           : 'text-slate-300'
       }`}>
-        {formatCurrency(value, 'TOMAN')}
+        {formatCurrency(value, currencyMode)}
       </span>
     </button>
   );
@@ -261,11 +283,13 @@ function CategoryList({
   tab,
   expanded,
   onToggle,
+  currencyMode,
 }: {
   result: RollupResult;
   tab: Tab;
   expanded: Set<string>;
   onToggle: (id: string) => void;
+  currencyMode: CurrencyMode;
 }) {
   const { nodes, total, uncategorized } = result;
 
@@ -295,10 +319,11 @@ function CategoryList({
           accent={accent}
           isExpanded={expanded.has(n.id)}
           onToggle={() => onToggle(n.id)}
+          currencyMode={currencyMode}
         />
       ))}
       {uncategorized.total > 0 && (
-        <UncategorizedRow total={uncategorized.total} count={uncategorized.count} parentTotal={total} accent={accent} />
+        <UncategorizedRow total={uncategorized.total} count={uncategorized.count} parentTotal={total} accent={accent} currencyMode={currencyMode} />
       )}
     </div>
   );
@@ -327,12 +352,14 @@ function CategoryRow({
   accent,
   isExpanded,
   onToggle,
+  currencyMode,
 }: {
   node: RollupNode;
   total: number;
   accent: 'emerald' | 'rose';
   isExpanded: boolean;
   onToggle: () => void;
+  currencyMode: CurrencyMode;
 }) {
   const displayValue = node.depth === 0 ? node.rolled : node.own;
   const pct = total > 0 ? (displayValue / total) * 100 : 0;
@@ -374,7 +401,7 @@ function CategoryRow({
             )}
           </span>
           <span className={`text-xs font-mono font-bold ${empty ? 'text-slate-500' : textColor}`}>
-            {formatCurrency(displayValue, 'TOMAN')}
+            {formatCurrency(displayValue, currencyMode)}
           </span>
         </div>
         <div className="flex items-center gap-2 mt-1">
@@ -398,11 +425,13 @@ function UncategorizedRow({
   count,
   parentTotal,
   accent,
+  currencyMode,
 }: {
   total: number;
   count: number;
   parentTotal: number;
   accent: 'emerald' | 'rose';
+  currencyMode: CurrencyMode;
 }) {
   const pct = parentTotal > 0 ? (total / parentTotal) * 100 : 0;
   const textColor = accent === 'emerald' ? 'text-emerald-400' : 'text-rose-400';
@@ -416,7 +445,7 @@ function UncategorizedRow({
             <span className="text-[10px] text-slate-500 mr-1">({count} تراکنش)</span>
           </span>
           <span className={`text-xs font-mono font-bold ${textColor}`}>
-            {formatCurrency(total, 'TOMAN')}
+            {formatCurrency(total, currencyMode)}
           </span>
         </div>
         <div className="text-[10px] font-mono text-slate-500 mt-0.5">{pct.toFixed(1)}٪</div>

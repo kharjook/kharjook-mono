@@ -110,6 +110,21 @@ export interface Transaction {
   amount: number | null;
   price_toman: number | null;
   usd_rate: number | null;
+
+  /**
+   * Cashflow snapshot captured AT THE MOMENT the tx was written. Populated
+   * for BUY/SELL/INCOME/EXPENSE; always NULL for TRANSFER (neutral).
+   *
+   * Reports SUM these columns directly — never reconvert via today's rate.
+   * This is the only way to survive IRT inflation without rewriting
+   * history each time the toman/USD rate moves.
+   *
+   * NULL = legacy row not backfillable (no currency rate at migration
+   * time). Reports must surface the unpriced count rather than silently
+   * treating it as 0.
+   */
+  amount_toman_at_time: number | null;
+  amount_usd_at_time: number | null;
 }
 
 export interface AssetStats {

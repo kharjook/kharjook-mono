@@ -37,6 +37,7 @@ import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import type {
   Asset,
   Category,
+  Currency,
   CurrencyRate,
   DailyPrice,
   Transaction,
@@ -86,17 +87,107 @@ const PRIMARY_SIDE: Record<TransactionType, 'source' | 'target'> = {
 type TypeShape = {
   source: EndpointKind[] | null;
   target: EndpointKind[] | null;
-  needsPrice: boolean;
   needsCategory: 'income' | 'expense' | null;
 };
 
 const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
-  BUY:      { source: ['wallet'],          target: ['asset'],           needsPrice: true,  needsCategory: null },
-  SELL:     { source: ['asset'],           target: ['wallet'],          needsPrice: true,  needsCategory: null },
-  TRANSFER: { source: ['wallet', 'asset'], target: ['wallet', 'asset'], needsPrice: false, needsCategory: null },
-  INCOME:   { source: null,                target: ['wallet', 'asset'], needsPrice: false, needsCategory: 'income' },
-  EXPENSE:  { source: ['wallet', 'asset'], target: null,                needsPrice: false, needsCategory: 'expense' },
+  BUY:      { source: ['wallet'],          target: ['asset'],           needsCategory: null },
+  SELL:     { source: ['asset'],           target: ['wallet'],          needsCategory: null },
+  TRANSFER: { source: ['wallet', 'asset'], target: ['wallet', 'asset'], needsCategory: null },
+  INCOME:   { source: null,                target: ['wallet', 'asset'], needsCategory: 'income' },
+  EXPENSE:  { source: ['wallet', 'asset'], target: null,                needsCategory: 'expense' },
 };
+
+/**
+ * Pricing context per form state — decides whether we prompt for
+ * `priceToman` / `usdRate` and what label to show.
+ *
+ * Rule:
+ *  - BUY/SELL always need both (the existing trade form).
+ *  - TRANSFER never needs pricing (portfolio-neutral).
+ *  - INCOME/EXPENSE need pricing WHENEVER the endpoint is not an IRT
+ *    wallet. For IRT wallets, the amount is already in Toman and we
+ *    auto-capture today's USD rate silently for the USD snapshot.
+ *  - For asset endpoints, `priceToman` is "Toman per unit of asset".
+ *  - For non-IRT wallet endpoints, `priceToman` is "Toman per unit of
+ *    that wallet's currency" (e.g. Toman per USDT). Equivalent to the
+ *    current-rate entry but captured at the tx date.
+ *
+ * `autoCaptureUsdRate` is true for IRT wallets: we DO store
+ * `amount_usd_at_time` but do not prompt the user; today's usd rate
+ * is used at insert time. Auditable via daily price snapshots if
+ * needed; for finance accuracy, non-IRT INCOME/EXPENSE MUST prompt.
+ */
+type PricingContext = {
+  needsPrice: boolean;
+  needsUsdRate: boolean;
+  priceLabel: string;
+  endpointKind: EndpointKind | null;
+  /** Sole wallet currency when the priced endpoint is a wallet. */
+  walletCurrency: Currency | null;
+};
+
+function pricingContextOf(form: FormState, wallets: Wallet[]): PricingContext {
+  if (form.type === 'TRANSFER') {
+    return {
+      needsPrice: false,
+      needsUsdRate: false,
+      priceLabel: '',
+      endpointKind: null,
+      walletCurrency: null,
+    };
+  }
+  if (form.type === 'BUY' || form.type === 'SELL') {
+    // BUY/SELL: priceToman is always the asset price; usdRate is shown
+    // when the wallet-side is USD (existing behavior).
+    const wallet = form.type === 'BUY'
+      ? walletFromForm(form, 'source', wallets)
+      : walletFromForm(form, 'target', wallets);
+    return {
+      needsPrice: true,
+      needsUsdRate: true, // always stored; UI shows it only for USD wallets
+      priceLabel: 'قیمت واحد (تومان)',
+      endpointKind: 'asset',
+      walletCurrency: wallet?.currency ?? null,
+    };
+  }
+
+  // INCOME / EXPENSE
+  const kind = form.type === 'INCOME' ? form.targetKind : form.sourceKind;
+  const id   = form.type === 'INCOME' ? form.targetId   : form.sourceId;
+
+  if (kind === 'asset') {
+    return {
+      needsPrice: true,
+      needsUsdRate: true,
+      priceLabel: 'قیمت هر واحد دارایی (تومان)',
+      endpointKind: 'asset',
+      walletCurrency: null,
+    };
+  }
+  if (kind === 'wallet' && id) {
+    const w = wallets.find((x) => x.id === id);
+    if (!w) return { needsPrice: false, needsUsdRate: false, priceLabel: '', endpointKind: 'wallet', walletCurrency: null };
+    if (w.currency === 'IRT') {
+      return {
+        needsPrice: false,
+        needsUsdRate: false,
+        priceLabel: '',
+        endpointKind: 'wallet',
+        walletCurrency: 'IRT',
+      };
+    }
+    return {
+      needsPrice: true,
+      needsUsdRate: true,
+      priceLabel: `قیمت هر ${CURRENCY_META[w.currency].label} (تومان)`,
+      endpointKind: 'wallet',
+      walletCurrency: w.currency,
+    };
+  }
+  // Endpoint not chosen yet → suppress the price fields until it is.
+  return { needsPrice: false, needsUsdRate: false, priceLabel: '', endpointKind: null, walletCurrency: null };
+}
 
 interface TypeStyle {
   label: string;
@@ -364,11 +455,9 @@ function sourceBalance(
   return null;
 }
 
-function validateForm(form: FormState): string | null {
+function validateForm(form: FormState, wallets: Wallet[]): string | null {
   if (!form.date) return 'تاریخ الزامی است.';
   if (!parseJalaali(form.date)) return 'تاریخ نامعتبر است.';
-
-  const shape = TYPE_SHAPES[form.type];
 
   switch (form.type) {
     case 'BUY':
@@ -408,19 +497,113 @@ function validateForm(form: FormState): string | null {
     if (!Number.isFinite(v) || v <= 0) return 'مقدار مقصد نامعتبر است.';
   }
 
-  if (shape.needsPrice) {
+  const ctx = pricingContextOf(form, wallets);
+  if (ctx.needsPrice) {
     const p = Number(form.priceToman);
-    const u = Number(form.usdRate);
     if (!Number.isFinite(p) || p <= 0) return 'قیمت واحد (تومان) نامعتبر است.';
+  }
+  if (ctx.needsUsdRate) {
+    const u = Number(form.usdRate);
     if (!Number.isFinite(u) || u <= 0) return 'نرخ دلار نامعتبر است.';
   }
 
   return null;
 }
 
-function buildPayload(form: FormState, userId: string): Record<string, unknown> {
-  // `usd_rate` is ONLY meaningful on BUY/SELL. See previous notes in history —
-  // the legacy stats layer derives PnL from the per-row columns.
+// ─── Amount-at-time snapshots ───────────────────────────────────────────────
+//
+// Computes cashflow snapshots in BOTH Toman and USD for every transaction
+// type that contributes to cashflow / P&L. TRANSFER returns nulls.
+//
+// For IRT-wallet INCOME/EXPENSE: amount already IS Toman; USD derived
+// from `form.usdRate` (which is pre-filled with today's rate on new
+// forms). For non-IRT wallet / asset INCOME/EXPENSE: both `priceToman`
+// and `usdRate` are user-provided, captured at transaction date.
+
+function computeAmountSnapshots(
+  form: FormState,
+  wallets: Wallet[]
+): { toman: number | null; usd: number | null } {
+  const usdRate = Number(form.usdRate);
+  const validUsdRate = Number.isFinite(usdRate) && usdRate > 0 ? usdRate : null;
+
+  const computeFromAmountPrice = (amount: number, priceToman: number) => {
+    const toman = amount * priceToman;
+    const usd = validUsdRate ? toman / validUsdRate : null;
+    return { toman, usd };
+  };
+
+  switch (form.type) {
+    case 'BUY':
+    case 'SELL': {
+      const amount = form.type === 'BUY'
+        ? Number(form.targetAmount)
+        : Number(form.sourceAmount);
+      const price = Number(form.priceToman);
+      if (!Number.isFinite(amount) || amount <= 0) return { toman: null, usd: null };
+      if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+      return computeFromAmountPrice(amount, price);
+    }
+
+    case 'INCOME': {
+      const amount = Number(form.targetAmount);
+      if (!Number.isFinite(amount) || amount <= 0) return { toman: null, usd: null };
+
+      if (form.targetKind === 'asset') {
+        const price = Number(form.priceToman);
+        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+        return computeFromAmountPrice(amount, price);
+      }
+      if (form.targetKind === 'wallet' && form.targetId) {
+        const w = wallets.find((x) => x.id === form.targetId);
+        if (!w) return { toman: null, usd: null };
+        if (w.currency === 'IRT') {
+          return computeFromAmountPrice(amount, 1);
+        }
+        const price = Number(form.priceToman);
+        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+        return computeFromAmountPrice(amount, price);
+      }
+      return { toman: null, usd: null };
+    }
+
+    case 'EXPENSE': {
+      const amount = Number(form.sourceAmount);
+      if (!Number.isFinite(amount) || amount <= 0) return { toman: null, usd: null };
+
+      if (form.sourceKind === 'asset') {
+        const price = Number(form.priceToman);
+        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+        return computeFromAmountPrice(amount, price);
+      }
+      if (form.sourceKind === 'wallet' && form.sourceId) {
+        const w = wallets.find((x) => x.id === form.sourceId);
+        if (!w) return { toman: null, usd: null };
+        if (w.currency === 'IRT') {
+          return computeFromAmountPrice(amount, 1);
+        }
+        const price = Number(form.priceToman);
+        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+        return computeFromAmountPrice(amount, price);
+      }
+      return { toman: null, usd: null };
+    }
+
+    case 'TRANSFER':
+      return { toman: null, usd: null };
+  }
+}
+
+function buildPayload(
+  form: FormState,
+  userId: string,
+  wallets: Wallet[]
+): Record<string, unknown> {
+  // Polymorphic columns default to NULL — the per-type switch below fills
+  // only the fields that apply. Legacy `asset_id` / `amount` / `price_toman`
+  // / `usd_rate` are populated on every row that references an asset so
+  // the period-stats replay stays oblivious to INCOME/EXPENSE vs BUY/SELL
+  // semantics.
   const base: Record<string, unknown> = {
     user_id: userId,
     type: form.type,
@@ -437,6 +620,8 @@ function buildPayload(form: FormState, userId: string): Record<string, unknown> 
     amount: null,
     price_toman: null,
     usd_rate: null,
+    amount_toman_at_time: null,
+    amount_usd_at_time: null,
   };
 
   const setSource = () => {
@@ -474,12 +659,34 @@ function buildPayload(form: FormState, userId: string): Record<string, unknown> 
     case 'INCOME':
       setTarget();
       base.category_id = form.categoryId;
+      // Asset-side INCOME: populate the legacy trio so asset stats replay
+      // treats these new units as acquired at `price_toman` (cost basis
+      // = market at receipt, symmetric with a BUY).
+      if (form.targetKind === 'asset') {
+        base.asset_id = form.targetId;
+        base.amount = Number(form.targetAmount);
+        base.price_toman = Number(form.priceToman);
+        base.usd_rate = Number(form.usdRate);
+      }
       break;
     case 'EXPENSE':
       setSource();
       base.category_id = form.categoryId;
+      // Asset-side EXPENSE: populate the legacy trio so asset stats
+      // realize P/L against running cost basis (symmetric with a SELL).
+      if (form.sourceKind === 'asset') {
+        base.asset_id = form.sourceId;
+        base.amount = Number(form.sourceAmount);
+        base.price_toman = Number(form.priceToman);
+        base.usd_rate = Number(form.usdRate);
+      }
       break;
   }
+
+  const snap = computeAmountSnapshots(form, wallets);
+  base.amount_toman_at_time = snap.toman;
+  base.amount_usd_at_time = snap.usd;
+
   return base;
 }
 
@@ -677,7 +884,7 @@ export function AddTransactionView({
     e.preventDefault();
 
     for (let i = 0; i < rows.length; i++) {
-      const err = validateForm(rows[i]);
+      const err = validateForm(rows[i], wallets);
       if (err) {
         const msg = rows.length > 1 ? `تراکنش #${i + 1}: ${err}` : err;
         toast.error(msg);
@@ -693,7 +900,7 @@ export function AddTransactionView({
     setIsSubmitting(true);
     try {
       if (isEdit && txToEdit) {
-        const payload = buildPayload(rows[0], user.id);
+        const payload = buildPayload(rows[0], user.id, wallets);
         const { data, error } = await supabase
           .from('transactions')
           .update(payload)
@@ -710,7 +917,7 @@ export function AddTransactionView({
         toast.success('تراکنش به‌روزرسانی شد.');
         router.back();
       } else {
-        const payloads = rows.map((r) => buildPayload(r, user.id));
+        const payloads = rows.map((r) => buildPayload(r, user.id, wallets));
         const { data, error } = await supabase
           .from('transactions')
           .insert(payloads)
@@ -906,6 +1113,7 @@ function TransactionFormRow({
 }) {
   const shape = TYPE_SHAPES[form.type];
   const style = TYPE_STYLES[form.type];
+  const pricing = pricingContextOf(form, wallets);
   const isBulk = totalRows > 1;
 
   const [pickerOpen, setPickerOpen] = useState<null | 'source' | 'target'>(null);
@@ -1163,16 +1371,22 @@ function TransactionFormRow({
           </div>
         )}
 
-        {/* Price (BUY/SELL) */}
-        {shape.needsPrice && (
+        {/* Price fields (BUY/SELL always; INCOME/EXPENSE when endpoint is
+            non-IRT wallet or asset — see pricingContextOf). */}
+        {pricing.needsPrice && (
           <PriceFields
+            priceLabel={pricing.priceLabel}
             priceToman={form.priceToman}
             usdRate={form.usdRate}
             onPriceToman={(v) => updateField('priceToman', v)}
             onUsdRate={(v) => updateField('usdRate', v)}
+            /* Existing BUY/SELL rule kept: USD-wallet trades prompt for the
+               per-tx USD rate. Non-IRT INCOME/EXPENSE always prompt. The
+               IRT BUY/SELL case still uses today's rate silently. */
             showUsdRate={
               (form.type === 'BUY' && sourceWallet?.currency === 'USD') ||
-              (form.type === 'SELL' && targetWallet?.currency === 'USD')
+              (form.type === 'SELL' && targetWallet?.currency === 'USD') ||
+              ((form.type === 'INCOME' || form.type === 'EXPENSE') && pricing.needsUsdRate)
             }
           />
         )}
@@ -1497,12 +1711,14 @@ function CrossCurrencyTargetField({
 }
 
 function PriceFields({
+  priceLabel,
   priceToman,
   usdRate,
   onPriceToman,
   onUsdRate,
   showUsdRate,
 }: {
+  priceLabel: string;
   priceToman: string;
   usdRate: string;
   onPriceToman: (v: string) => void;
@@ -1512,7 +1728,7 @@ function PriceFields({
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-xs text-slate-400 mb-1">قیمت واحد (تومان)</label>
+        <label className="block text-xs text-slate-400 mb-1">{priceLabel || 'قیمت واحد (تومان)'}</label>
         <FormattedNumberInput
           value={priceToman}
           onValueChange={onPriceToman}
@@ -1693,7 +1909,7 @@ function PreviewPanel({
   categories: Category[];
   style: TypeStyle;
 }) {
-  const valid = rows.map((r) => validateForm(r) === null);
+  const valid = rows.map((r) => validateForm(r, wallets) === null);
   const validCount = valid.filter(Boolean).length;
 
   if (validCount === 0) {

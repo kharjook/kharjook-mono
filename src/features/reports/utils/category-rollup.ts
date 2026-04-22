@@ -1,26 +1,38 @@
 /**
  * Category tree + rollup for income/expense reports.
  *
- * We build a forest keyed by `parent_id`, walk it in DFS order so parents
- * precede their children (UI relies on this for indentation), and compute two
- * values per category:
- *   - `own`    = sum of transactions directly tagged with this category in the
- *                period, in the wallet's toman-equivalent (we convert via
- *                `tomanPerUnit` to keep mixed-currency wallets comparable).
- *   - `rolled` = `own` + sum(rolled of children). Parent rows render this.
+ * We SUM the per-row snapshots written at transaction time:
+ *   - `amount_toman_at_time`
+ *   - `amount_usd_at_time`
+ * The `currencyMode` param picks which column is summed.
  *
- * Orphan categories whose parent lives in a different kind surface as roots
- * so nothing silently disappears.
+ * This is the only way to produce historically-accurate reports in an
+ * inflationary economy: converting a past transaction through today's
+ * currency_rates would silently rewrite history as rates move.
+ *
+ * Rows with a NULL snapshot (only legacy INCOME/EXPENSE that couldn't be
+ * backfilled, e.g. the user had no USD rate at migration time) are
+ * EXCLUDED from totals and counted in `unpricedCount` so the UI can
+ * surface the gap. We deliberately do NOT fall back to today's rate —
+ * silently fabricating numbers is exactly what we're trying to kill.
+ *
+ * Wallet filter:
+ *   - `walletId = null` → app-wide.
+ *   - `walletId = <id>` → only rows whose wallet endpoint matches.
+ *     Asset-endpoint rows are EXCLUDED from wallet-scoped views (they
+ *     don't live in a wallet). Filter to asset via UI in future if needed.
+ *
+ * Orphan categories (parent in a different kind) surface as roots so
+ * nothing silently disappears.
  */
 
 import type {
   Category,
   CategoryKind,
-  CurrencyRate,
+  CurrencyMode,
   Transaction,
   Wallet,
 } from '@/shared/types/domain';
-import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { isInPeriod, type Period } from '@/shared/utils/period';
 
 export type CashflowKind = Extract<CategoryKind, 'income' | 'expense'>;
@@ -32,84 +44,105 @@ export interface RollupNode {
   depth: number;
   parentId: string | null;
   hasChildren: boolean;
-  own: number;    // toman, own transactions only
-  rolled: number; // toman, own + descendants
-  txCount: number; // own only (direct tagged transactions in period)
+  /** Own transactions only, in the requested currency. */
+  own: number;
+  /** Own + descendants, in the requested currency. */
+  rolled: number;
+  /** Count of direct-tagged transactions in period (own only). */
+  txCount: number;
 }
 
 export interface RollupResult {
   nodes: RollupNode[];
-  total: number; // grand total in toman for this kind/period/filter
-  /** Quick lookup: which rows have expandable subtrees. */
+  /** Grand total in the requested currency for this kind/period/filter. */
+  total: number;
   childrenOf: Map<string, string[]>;
   uncategorized: {
-    /** Toman total of period txs without a matching category (or wrong kind). */
     total: number;
     count: number;
   };
+  /**
+   * Rows matching the filter but whose snapshot is NULL (un-backfillable
+   * legacy). Not included in `total` / `own` / `rolled`. UI should surface
+   * this so the user can retro-edit those rows.
+   */
+  unpricedCount: number;
 }
 
 export interface RollupInput {
   transactions: Transaction[];
   categories: Category[];
   wallets: Wallet[];
-  currencyRates: CurrencyRate[];
   period: Period;
   kind: CashflowKind;
-  /** Filter to one wallet. `null` = app-wide. */
+  /** `null` = app-wide. Wallet-scoped views exclude asset-endpoint rows. */
   walletId: string | null;
+  currencyMode: CurrencyMode;
 }
 
 /**
- * Compute the toman-equivalent value of an INCOME/EXPENSE transaction on the
- * side that actually matters for that kind. INCOME deposits into the *target*
- * wallet; EXPENSE withdraws from the *source* wallet. We only handle wallet
- * endpoints here — asset-side INCOME/EXPENSE is uncommon and would need an
- * explicit conversion we don't have yet.
+ * Resolve the snapshot for the right side of an INCOME/EXPENSE tx and
+ * return the wallet id (if wallet endpoint) so the wallet-filter can
+ * apply. Asset endpoints return walletId=null and can only contribute
+ * when the filter is app-wide.
  */
-function txTomanValue(
+function txCashflow(
   tx: Transaction,
   kind: CashflowKind,
-  wallets: Wallet[],
-  rates: CurrencyRate[]
-): { toman: number; walletId: string | null } {
+  mode: CurrencyMode
+): {
+  value: number | null;
+  walletId: string | null;
+  isAsset: boolean;
+} {
+  const snapshot = mode === 'TOMAN' ? tx.amount_toman_at_time : tx.amount_usd_at_time;
+  const value = snapshot == null ? null : Number(snapshot);
+
   const walletId = kind === 'income' ? tx.target_wallet_id : tx.source_wallet_id;
-  const amount = kind === 'income' ? Number(tx.target_amount) : Number(tx.source_amount);
-  if (!walletId || !Number.isFinite(amount) || amount <= 0) {
-    return { toman: 0, walletId: null };
-  }
-  const wallet = wallets.find((w) => w.id === walletId);
-  if (!wallet) return { toman: 0, walletId };
-  const rate = tomanPerUnit(wallet.currency, rates);
-  if (rate <= 0) return { toman: 0, walletId };
-  return { toman: amount * rate, walletId };
+  const assetId = kind === 'income' ? tx.target_asset_id : tx.source_asset_id;
+  const isAsset = !walletId && !!assetId;
+
+  return { value, walletId, isAsset };
 }
 
 export function rollupCategories(input: RollupInput): RollupResult {
-  const { transactions, categories, period, kind, walletId, wallets, currencyRates } = input;
+  const { transactions, categories, period, kind, walletId, currencyMode } = input;
 
   // 1) Bucket txs into own totals per category.
-  const ownByCat = new Map<string, { toman: number; count: number }>();
-  let uncategorizedToman = 0;
+  const ownByCat = new Map<string, { amount: number; count: number }>();
+  let uncategorizedTotal = 0;
   let uncategorizedCount = 0;
+  let unpricedCount = 0;
   const targetType = kind === 'income' ? 'INCOME' : 'EXPENSE';
 
   for (const tx of transactions) {
     if (tx.type !== targetType) continue;
     if (!isInPeriod(tx.date_string, period)) continue;
 
-    const { toman, walletId: txWalletId } = txTomanValue(tx, kind, wallets, currencyRates);
-    if (toman <= 0) continue;
-    if (walletId && txWalletId !== walletId) continue;
+    const { value, walletId: txWalletId, isAsset } = txCashflow(tx, kind, currencyMode);
+
+    // Wallet-scoped view excludes asset-endpoint transactions outright.
+    // (They can't meaningfully be assigned to a "wallet filter".)
+    if (walletId) {
+      if (isAsset) continue;
+      if (txWalletId !== walletId) continue;
+    }
+
+    if (value == null || !Number.isFinite(value) || value <= 0) {
+      // Row matched period + filter but has no snapshot → unpriced.
+      // Skip value but track so UI can flag it.
+      if (value == null) unpricedCount += 1;
+      continue;
+    }
 
     const catId = tx.category_id;
     if (catId) {
-      const cur = ownByCat.get(catId) ?? { toman: 0, count: 0 };
-      cur.toman += toman;
+      const cur = ownByCat.get(catId) ?? { amount: 0, count: 0 };
+      cur.amount += value;
       cur.count += 1;
       ownByCat.set(catId, cur);
     } else {
-      uncategorizedToman += toman;
+      uncategorizedTotal += value;
       uncategorizedCount += 1;
     }
   }
@@ -133,7 +166,7 @@ export function rollupCategories(input: RollupInput): RollupResult {
   // 3) Post-order rollup so parents see final child totals.
   const rolledById = new Map<string, number>();
   const visitRollup = (id: string): number => {
-    const own = ownByCat.get(id)?.toman ?? 0;
+    const own = ownByCat.get(id)?.amount ?? 0;
     const children = childrenOf.get(id) ?? [];
     let sum = own;
     for (const cid of children) sum += visitRollup(cid);
@@ -148,7 +181,7 @@ export function rollupCategories(input: RollupInput): RollupResult {
   const visitFlat = (id: string, depth: number) => {
     const c = byId.get(id);
     if (!c) return;
-    const own = ownByCat.get(id)?.toman ?? 0;
+    const own = ownByCat.get(id)?.amount ?? 0;
     const count = ownByCat.get(id)?.count ?? 0;
     const rolled = rolledById.get(id) ?? 0;
     const children = childrenOf.get(id) ?? [];
@@ -182,13 +215,14 @@ export function rollupCategories(input: RollupInput): RollupResult {
   for (const r of sortedRoots) visitFlat(r.id, 0);
 
   // 5) Total = sum of roots + uncategorized. (Descendants already counted.)
-  let total = uncategorizedToman;
+  let total = uncategorizedTotal;
   for (const r of roots) total += rolledById.get(r.id) ?? 0;
 
   return {
     nodes,
     total,
     childrenOf,
-    uncategorized: { total: uncategorizedToman, count: uncategorizedCount },
+    uncategorized: { total: uncategorizedTotal, count: uncategorizedCount },
+    unpricedCount,
   };
 }
