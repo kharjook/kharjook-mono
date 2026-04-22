@@ -1,6 +1,7 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Vazirmatn } from 'next/font/google';
 import './globals.css';
+import { ServiceWorkerRegistrar } from '@/shared/components/ServiceWorkerRegistrar';
 
 const vazirmatn = Vazirmatn({
   variable: '--font-sans',
@@ -12,6 +13,30 @@ const vazirmatn = Vazirmatn({
 export const metadata: Metadata = {
   title: 'خرجوک',
   description: 'مدیریت سبد دارایی',
+  applicationName: 'خرجوک',
+  appleWebApp: {
+    capable: true,
+    title: 'خرجوک',
+    statusBarStyle: 'black-translucent',
+  },
+  formatDetection: {
+    telephone: false,
+    email: false,
+    address: false,
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#0F1015',
+  colorScheme: 'dark',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -25,7 +50,10 @@ export default function RootLayout({
       dir="rtl"
       className={`${vazirmatn.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      <body className="min-h-full flex flex-col font-sans">
+        {children}
+        <ServiceWorkerRegistrar />
+      </body>
     </html>
   );
 }

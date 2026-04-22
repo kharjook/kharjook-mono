@@ -18,9 +18,9 @@ export function Shell({ children, modal }: ShellProps) {
   const showNav = TAB_ROUTES.has(pathname);
 
   return (
-    <div className="bg-[#0F1015] text-slate-200 min-h-screen font-sans flex justify-center selection:bg-purple-500/30">
-      <div className="w-full sm:max-w-md bg-[#161722] relative sm:shadow-2xl flex flex-col h-screen overflow-hidden sm:border-x border-slate-800">
-        <header className="px-6 py-4 flex justify-between items-center bg-[#1A1B26] border-b border-white/5 z-10">
+    <div className="bg-[#0F1015] text-slate-200 min-h-dvh font-sans flex justify-center selection:bg-purple-500/30">
+      <div className="w-full sm:max-w-md bg-[#161722] relative sm:shadow-2xl flex flex-col h-dvh overflow-hidden sm:border-x border-slate-800">
+        <header className="px-6 py-4 pt-safe flex justify-between items-center bg-[#1A1B26] border-b border-white/5 z-10">
           <div className="flex flex-col">
             <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-l from-purple-400 to-purple-600">
               خرجوک
