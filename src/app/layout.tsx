@@ -1,13 +1,33 @@
 import type { Metadata, Viewport } from 'next';
-import { Vazirmatn } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 import { ServiceWorkerRegistrar } from '@/shared/components/ServiceWorkerRegistrar';
 
-const vazirmatn = Vazirmatn({
+const iranSansX = localFont({
   variable: '--font-sans',
-  subsets: ['arabic', 'latin'],
   display: 'swap',
-  weight: ['300', '400', '500', '600', '700', '800'],
+  src: [
+    {
+      path: './fonts/Iransansx/woff2/IRANSansX-Regular.woff2',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: './fonts/Iransansx/woff2/IRANSansX-Medium.woff2',
+      weight: '500',
+      style: 'normal',
+    },
+    {
+      path: './fonts/Iransansx/woff2/IRANSansX-DemiBold.woff2',
+      weight: '600',
+      style: 'normal',
+    },
+    {
+      path: './fonts/Iransansx/woff2/IRANSansX-ExtraBold.woff2',
+      weight: '800',
+      style: 'normal',
+    },
+  ],
 });
 
 export const metadata: Metadata = {
@@ -48,7 +68,7 @@ export default function RootLayout({
     <html
       lang="fa"
       dir="rtl"
-      className={`${vazirmatn.variable} h-full antialiased`}
+      className={`${iranSansX.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
         {children}
