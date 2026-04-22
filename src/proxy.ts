@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/shared/lib/supabase/proxy-client';
 
-const PUBLIC_ROUTES = ['/login'];
+const PUBLIC_ROUTES = ['/login', '/register'];
 
 export async function proxy(request: NextRequest) {
   const { response, user } = await updateSession(request);
@@ -17,7 +17,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && pathname === '/login') {
+  if (user && (pathname === '/login' || pathname === '/register')) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);
