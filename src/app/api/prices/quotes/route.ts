@@ -31,7 +31,7 @@ interface AbanTetherMarketRow {
 }
 
 const TGJU_USD_URL =
-  'https://r.jina.ai/http://https://www.tgju.org/profile/price_dollar_rl';
+  'https://r.jina.ai/http://www.tgju.org/profile/price_dollar_rl';
 
 async function fetchText(url: string, init?: RequestInit): Promise<string> {
   const response = await fetch(url, {
@@ -252,10 +252,28 @@ export async function POST(request: Request) {
     );
     const tgjuSources = sources.filter((source) => source.provider === 'tgju');
     const zarpaySources = sources.filter((source) => source.provider === 'zarpay');
+    // Provider outages should degrade partially, not take down the whole API.
+    const [abanTetherRes, tgjuRes, zarpayRes] = await Promise.allSettled([
+      abanTetherSources.length > 0
+        ? fetchAbanTetherMarkets()
+        : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
+      tgjuSources.length > 0 ? fetchTgjuUsdToman() : Promise.resolve(0),
+      zarpaySources.length > 0 ? fetchZarpayCoins() : Promise.resolve([] as ZarpayCoinRow[]),
+    ]);
     const abanTetherMarkets =
-      abanTetherSources.length > 0 ? await fetchAbanTetherMarkets() : {};
-    const tgjuUsdToman = tgjuSources.length > 0 ? await fetchTgjuUsdToman() : 0;
-    const zarpayMarket = zarpaySources.length > 0 ? await fetchZarpayCoins() : [];
+      abanTetherRes.status === 'fulfilled' ? abanTetherRes.value : {};
+    const tgjuUsdToman = tgjuRes.status === 'fulfilled' ? tgjuRes.value : 0;
+    const zarpayMarket = zarpayRes.status === 'fulfilled' ? zarpayRes.value : [];
+
+    if (abanTetherRes.status === 'rejected') {
+      console.warn('price quote refresh warning: abantether failed', abanTetherRes.reason);
+    }
+    if (tgjuRes.status === 'rejected') {
+      console.warn('price quote refresh warning: tgju failed', tgjuRes.reason);
+    }
+    if (zarpayRes.status === 'rejected') {
+      console.warn('price quote refresh warning: zarpay failed', zarpayRes.reason);
+    }
 
     const quotes = sources
       .map((source) =>
