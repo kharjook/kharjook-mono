@@ -19,7 +19,7 @@ import {
 } from '@/shared/utils/jalali';
 import * as j from 'jalaali-js';
 
-export type PeriodKind = 'day' | 'week' | 'month' | 'year';
+export type PeriodKind = 'day' | 'week' | 'month' | 'year' | 'all';
 
 export interface Period {
   kind: PeriodKind;
@@ -27,7 +27,8 @@ export interface Period {
   end: JalaaliDate;   // inclusive
 }
 
-export const PERIOD_KINDS: readonly PeriodKind[] = ['day', 'week', 'month', 'year'];
+export const PERIOD_KINDS: readonly PeriodKind[] = ['day', 'week', 'month', 'year', 'all'];
+const ALL_START: JalaaliDate = { jy: 1300, jm: 1, jd: 1 };
 
 const PERSIAN_DIGITS = (s: string | number) =>
   String(s).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[Number(c)]!);
@@ -68,6 +69,8 @@ export function periodContaining(kind: PeriodKind, d: JalaaliDate): Period {
       const end: JalaaliDate = { jy: d.jy, jm: 12, jd: jalaaliMonthLength(d.jy, 12) };
       return { kind, start, end };
     }
+    case 'all':
+      return { kind, start: ALL_START, end: todayJalaali() };
   }
 }
 
@@ -96,6 +99,8 @@ export function shiftPeriod(p: Period, delta: number): Period {
     }
     case 'year':
       return periodContaining('year', { jy: p.start.jy + delta, jm: 1, jd: 1 });
+    case 'all':
+      return p;
   }
 }
 
@@ -130,6 +135,8 @@ export function formatPeriodLabel(p: Period): string {
       return `${JALALI_MONTHS[p.start.jm - 1]} ${PERSIAN_DIGITS(p.start.jy)}`;
     case 'year':
       return `سال ${PERSIAN_DIGITS(p.start.jy)}`;
+    case 'all':
+      return 'از ابتدا';
   }
 }
 
@@ -139,6 +146,7 @@ export function formatPeriodKindLabel(kind: PeriodKind): string {
     case 'week':  return 'هفته';
     case 'month': return 'ماه';
     case 'year':  return 'سال';
+    case 'all':   return 'از ابتدا';
   }
 }
 
@@ -148,6 +156,7 @@ export function formatCurrentPeriodLabel(kind: PeriodKind): string {
     case 'week':  return 'این هفته';
     case 'month': return 'این ماه';
     case 'year':  return 'امسال';
+    case 'all':   return 'از ابتدا';
   }
 }
 

@@ -9,6 +9,7 @@ import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
+import { parseDateToNumber } from '@/shared/utils/parse-date';
 import { DetailCard } from '@/features/assets/components/DetailCard';
 
 export interface AssetDetailsViewProps {
@@ -36,10 +37,12 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   const assetTxs = transactions
     .filter((tx) => tx.asset_id === assetId)
     .slice()
-    .sort(
-      (a, b) =>
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    );
+    .sort((a, b) => {
+      const dateDiff =
+        parseDateToNumber(a.date_string) - parseDateToNumber(b.date_string);
+      if (dateDiff !== 0) return dateDiff;
+      return a.id.localeCompare(b.id);
+    });
 
   const stats = calculateAssetStats(asset, transactions, currencyMode, usdRate);
 

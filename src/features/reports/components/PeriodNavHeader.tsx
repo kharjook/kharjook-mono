@@ -27,6 +27,7 @@ export function PeriodNavHeader({ period, onChange }: PeriodNavHeaderProps) {
   };
 
   const atCurrent = isCurrentPeriod(period);
+  const isAllPeriod = period.kind === 'all';
 
   return (
     <div className="space-y-3">
@@ -54,13 +55,18 @@ export function PeriodNavHeader({ period, onChange }: PeriodNavHeaderProps) {
           type="button"
           onClick={() => onChange(shiftPeriod(period, -1))}
           aria-label="قبلی"
-          className="shrink-0 w-9 h-9 rounded-xl bg-[#1A1B26] border border-white/5 flex items-center justify-center text-slate-300 hover:bg-white/5 transition"
+          disabled={isAllPeriod}
+          className={`shrink-0 w-9 h-9 rounded-xl border border-white/5 flex items-center justify-center transition ${
+            isAllPeriod
+              ? 'bg-[#1A1B26] text-slate-700 cursor-not-allowed'
+              : 'bg-[#1A1B26] text-slate-300 hover:bg-white/5'
+          }`}
         >
           <ChevronRight size={18} />
         </button>
         <div className="flex-1 text-center">
           <div className="text-sm font-bold text-white">{formatPeriodLabel(period)}</div>
-          {!atCurrent && (
+          {!atCurrent && !isAllPeriod && (
             <button
               type="button"
               onClick={() => onChange(currentPeriod(period.kind))}
@@ -69,15 +75,23 @@ export function PeriodNavHeader({ period, onChange }: PeriodNavHeaderProps) {
               برگشت به {formatPeriodKindLabel(period.kind)} جاری
             </button>
           )}
-          {atCurrent && (
+          {atCurrent && !isAllPeriod && (
             <div className="text-[10px] text-slate-500 mt-0.5">{formatPeriodKindLabel(period.kind)} جاری</div>
+          )}
+          {isAllPeriod && (
+            <div className="text-[10px] text-slate-500 mt-0.5">نمایش تمام تاریخچه</div>
           )}
         </div>
         <button
           type="button"
           onClick={() => onChange(shiftPeriod(period, 1))}
           aria-label="بعدی"
-          className="shrink-0 w-9 h-9 rounded-xl bg-[#1A1B26] border border-white/5 flex items-center justify-center text-slate-300 hover:bg-white/5 transition"
+          disabled={isAllPeriod}
+          className={`shrink-0 w-9 h-9 rounded-xl border border-white/5 flex items-center justify-center transition ${
+            isAllPeriod
+              ? 'bg-[#1A1B26] text-slate-700 cursor-not-allowed'
+              : 'bg-[#1A1B26] text-slate-300 hover:bg-white/5'
+          }`}
         >
           <ChevronLeft size={18} />
         </button>

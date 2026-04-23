@@ -176,6 +176,8 @@ export function AssetsReportView() {
         />
 
         <SummaryCard
+          totalToman={totals.realizedToman + totals.unrealizedToman}
+          totalUsd={totals.realizedUsd + totals.unrealizedUsd}
           realizedToman={totals.realizedToman}
           realizedUsd={totals.realizedUsd}
           unrealizedToman={totals.unrealizedToman}
@@ -254,6 +256,8 @@ function AssetFilterChips({
 }
 
 function SummaryCard({
+  totalToman,
+  totalUsd,
   realizedToman,
   realizedUsd,
   unrealizedToman,
@@ -264,6 +268,8 @@ function SummaryCard({
   periodEndLabel,
   currencyMode,
 }: {
+  totalToman: number;
+  totalUsd: number;
   realizedToman: number;
   realizedUsd: number;
   unrealizedToman: number;
@@ -283,11 +289,25 @@ function SummaryCard({
         </span>
       </div>
       <PnlLine
+        label="سود/زیان کل (Total)"
+        toman={totalToman}
+        usd={totalUsd}
+        tip={
+          unrealizedMissingCount > 0
+            ? `جمع کل با کسر ${unrealizedMissingCount.toLocaleString('fa-IR')} دارایی بدون قیمت پایان دوره`
+            : 'مجموع محقق‌شده و باز در این دوره'
+        }
+        size="lg"
+        warn={unrealizedMissingCount > 0}
+        currencyMode={currencyMode}
+      />
+      <div className="border-t border-white/5" />
+      <PnlLine
         label="محقق‌شده (Realized)"
         toman={realizedToman}
         usd={realizedUsd}
         tip="از تراکنش‌های فروش انجام‌شده در این دوره"
-        size="lg"
+        size="md"
         currencyMode={currencyMode}
       />
       <div className="border-t border-white/5" />
@@ -377,6 +397,14 @@ function AssetRow({
   const hasActivity = stats.hadActivity;
   const realizedPrimary = currencyMode === 'USD' ? stats.realizedUsd : stats.realizedToman;
   const realizedSecondary = currencyMode === 'USD' ? stats.realizedToman : stats.realizedUsd;
+  const unrealizedPrimary = currencyMode === 'USD' ? stats.unrealizedUsd : stats.unrealizedToman;
+  const unrealizedSecondary = currencyMode === 'USD' ? stats.unrealizedToman : stats.unrealizedUsd;
+  const totalPrimary = stats.unrealizedAvailable
+    ? realizedPrimary + unrealizedPrimary
+    : null;
+  const totalSecondary = stats.unrealizedAvailable
+    ? realizedSecondary + unrealizedSecondary
+    : null;
   const secondaryMode: CurrencyMode = currencyMode === 'USD' ? 'TOMAN' : 'USD';
   const realizedPositive = realizedPrimary >= 0;
   const realizedColor =
@@ -468,8 +496,118 @@ function AssetRow({
         </div>
       )}
 
+      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5">
+        <MiniFact
+          label="سود/زیان محقق‌شده"
+          main={
+            <span className={realizedColor}>
+              {realizedPrimary > 0 ? '+' : ''}
+              {formatCurrency(realizedPrimary, currencyMode)}
+            </span>
+          }
+          sub={
+            <span className={realizedColor}>
+              {realizedSecondary > 0 ? '+' : ''}
+              {formatCurrency(realizedSecondary, secondaryMode)}
+            </span>
+          }
+        />
+        {stats.unrealizedAvailable ? (
+          <MiniFact
+            label="سود/زیان باز"
+            main={
+              <span
+                className={
+                  unrealizedPrimary > 0
+                    ? 'text-emerald-400'
+                    : unrealizedPrimary < 0
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                }
+              >
+                {unrealizedPrimary > 0 ? '+' : ''}
+                {formatCurrency(unrealizedPrimary, currencyMode)}
+              </span>
+            }
+            sub={
+              <span
+                className={
+                  unrealizedSecondary > 0
+                    ? 'text-emerald-400'
+                    : unrealizedSecondary < 0
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                }
+              >
+                {unrealizedSecondary > 0 ? '+' : ''}
+                {formatCurrency(unrealizedSecondary, secondaryMode)}
+              </span>
+            }
+            hint={
+              staleHint && !stats.periodEndPriceIsLive
+                ? `قیمت: ${formatJalaaliHuman(parseJalaali(staleHint)!)}`
+                : undefined
+            }
+          />
+        ) : (
+          <MiniFact
+            label="سود/زیان باز"
+            main={
+              <span className="text-slate-500 inline-flex items-center gap-1">
+                —
+                <Info size={11} className="text-slate-600" />
+              </span>
+            }
+            sub={
+              <span className="text-[10px] text-slate-600">
+                قیمت پایان دوره ثبت نشده
+              </span>
+            }
+          />
+        )}
+        {stats.unrealizedAvailable && totalPrimary !== null && totalSecondary !== null ? (
+          <MiniFact
+            label="سود/زیان کل"
+            main={
+              <span
+                className={
+                  totalPrimary > 0
+                    ? 'text-emerald-400'
+                    : totalPrimary < 0
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                }
+              >
+                {totalPrimary > 0 ? '+' : ''}
+                {formatCurrency(totalPrimary, currencyMode)}
+              </span>
+            }
+            sub={
+              <span
+                className={
+                  totalSecondary > 0
+                    ? 'text-emerald-400'
+                    : totalSecondary < 0
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                }
+              >
+                {totalSecondary > 0 ? '+' : ''}
+                {formatCurrency(totalSecondary, secondaryMode)}
+              </span>
+            }
+          />
+        ) : (
+          <MiniFact
+            label="سود/زیان کل"
+            main={<span className="text-slate-500">—</span>}
+            sub={<span className="text-[10px] text-slate-600">به قیمت تاریخی نیاز دارد</span>}
+          />
+        )}
+      </div>
+
       {stats.endHoldings > 0 && (
-        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
+        <div className="grid grid-cols-1 gap-2 pt-2 border-t border-white/5">
           <MiniFact
             label="میانگین قیمت خرید (پایان دوره)"
             main={formatCurrency(
@@ -481,67 +619,6 @@ function AssetRow({
               secondaryMode
             )}
           />
-          {stats.unrealizedAvailable ? (
-            (() => {
-              const unrealizedPrimary =
-                currencyMode === 'USD' ? stats.unrealizedUsd : stats.unrealizedToman;
-              const unrealizedSecondary =
-                currencyMode === 'USD' ? stats.unrealizedToman : stats.unrealizedUsd;
-              return (
-                <MiniFact
-                  label="سود/زیان باز"
-                  main={
-                    <span
-                      className={
-                        unrealizedPrimary > 0
-                          ? 'text-emerald-400'
-                          : unrealizedPrimary < 0
-                            ? 'text-rose-400'
-                            : 'text-slate-400'
-                      }
-                    >
-                      {unrealizedPrimary > 0 ? '+' : ''}
-                      {formatCurrency(unrealizedPrimary, currencyMode)}
-                    </span>
-                  }
-                  sub={
-                    <span
-                      className={
-                        unrealizedSecondary > 0
-                          ? 'text-emerald-400'
-                          : unrealizedSecondary < 0
-                            ? 'text-rose-400'
-                            : 'text-slate-400'
-                      }
-                    >
-                      {unrealizedSecondary > 0 ? '+' : ''}
-                      {formatCurrency(unrealizedSecondary, secondaryMode)}
-                    </span>
-                  }
-                  hint={
-                    staleHint && !stats.periodEndPriceIsLive
-                      ? `قیمت: ${formatJalaaliHuman(parseJalaali(staleHint)!)}`
-                      : undefined
-                  }
-                />
-              );
-            })()
-          ) : (
-            <MiniFact
-              label="سود/زیان باز"
-              main={
-                <span className="text-slate-500 inline-flex items-center gap-1">
-                  —
-                  <Info size={11} className="text-slate-600" />
-                </span>
-              }
-              sub={
-                <span className="text-[10px] text-slate-600">
-                  قیمت پایان دوره ثبت نشده
-                </span>
-              }
-            />
-          )}
         </div>
       )}
     </div>

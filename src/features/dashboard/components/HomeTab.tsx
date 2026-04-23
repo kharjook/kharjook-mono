@@ -7,6 +7,10 @@ import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { formatCurrency } from '@/shared/utils/format-currency';
+import { currentPeriod } from '@/shared/utils/period';
+import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
+import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
+import { effectivePriceAt } from '@/features/reports/utils/price-history';
 
 const CASH_SLICE_COLOR = '#94a3b8'; // slate-400
 const CASH_SLICE_NAME = 'نقد';
@@ -18,6 +22,7 @@ export function HomeTab() {
     transactions,
     wallets,
     currencyRates,
+    dailyPrices,
     isLoadingData,
     refreshAll,
   } = useData();
@@ -82,8 +87,37 @@ export function HomeTab() {
     const totalValueUsd =
       usdRate > 0 ? totalValueToman / usdRate : assetsValueUsd;
 
-    const totalProfitToman = assetsValueToman - totalCostToman;
-    const isProfit = totalProfitToman >= 0;
+    const currentYear = currentPeriod('year');
+    const currentYearEnd = formatJalaali(currentYear.end);
+    const todayStr = formatJalaali(todayJalaali());
+    let yearTotalProfitToman = 0;
+    let yearTotalProfitUsd = 0;
+    let yearProfitMissingCount = 0;
+
+    for (const asset of assets) {
+      const periodEndPrice = effectivePriceAt(
+        asset,
+        currentYearEnd,
+        dailyPrices,
+        todayStr
+      );
+      const periodStats = calculateAssetPeriodStats(
+        asset,
+        transactions,
+        currentYear,
+        usdRate,
+        periodEndPrice
+      );
+      yearTotalProfitToman += periodStats.realizedToman;
+      yearTotalProfitUsd += periodStats.realizedUsd;
+      if (periodStats.unrealizedAvailable) {
+        yearTotalProfitToman += periodStats.unrealizedToman;
+        yearTotalProfitUsd += periodStats.unrealizedUsd;
+      } else {
+        yearProfitMissingCount += 1;
+      }
+    }
+    const isProfit = yearTotalProfitToman >= 0;
 
     const distributions = Array.from(categoryMap.values());
     distributions.forEach((d) => {
@@ -95,20 +129,31 @@ export function HomeTab() {
       totalValueToman,
       totalValueUsd,
       cashValueToman,
-      totalProfitToman,
+      yearTotalProfitToman,
+      yearTotalProfitUsd,
+      yearProfitMissingCount,
       isProfit,
       distributions,
     };
-  }, [assets, categories, transactions, wallets, currencyRates, currencyMode, usdRate]);
+  }, [
+    assets,
+    categories,
+    transactions,
+    wallets,
+    currencyRates,
+    dailyPrices,
+    currencyMode,
+    usdRate,
+  ]);
 
   const displayValue =
     currencyMode === 'USD'
       ? portfolioStats.totalValueUsd
       : portfolioStats.totalValueToman;
   const displayProfit =
-    currencyMode === 'USD' && usdRate > 0
-      ? portfolioStats.totalProfitToman / usdRate
-      : portfolioStats.totalProfitToman;
+    currencyMode === 'USD'
+      ? portfolioStats.yearTotalProfitUsd
+      : portfolioStats.yearTotalProfitToman;
   const displayCash =
     currencyMode === 'USD' && usdRate > 0
       ? portfolioStats.cashValueToman / usdRate
@@ -159,6 +204,12 @@ export function HomeTab() {
           </div>
           <span className="text-slate-500 text-xs">سود/زیان دارایی‌ها</span>
         </div>
+        <p className="text-[11px] text-slate-500 mt-2 relative z-10">
+          سود/زیان کل امسال
+          {portfolioStats.yearProfitMissingCount > 0
+            ? ` · ${portfolioStats.yearProfitMissingCount.toLocaleString('fa-IR')} دارایی بدون قیمت تاریخی`
+            : ''}
+        </p>
       </div>
 
       <div>

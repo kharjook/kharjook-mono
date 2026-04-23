@@ -24,13 +24,16 @@ import {
   PERIOD_KINDS,
   type PeriodKind,
 } from '@/shared/utils/period';
+import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
 import { rollupCategories } from '@/features/reports/utils/category-rollup';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
+import { effectivePriceAt } from '@/features/reports/utils/price-history';
 
 export function ReportsIndexView() {
   const router = useRouter();
-  const { transactions, categories, wallets, assets } = useData();
+  const { transactions, categories, wallets, assets, dailyPrices } = useData();
   const { usdRate, currencyMode } = useUI();
+  const todayStr = useMemo(() => formatJalaali(todayJalaali()), []);
 
   const cashflowByPeriod = useMemo(() => {
     return PERIOD_KINDS.map((kind) => {
@@ -47,34 +50,47 @@ export function ReportsIndexView() {
     });
   }, [transactions, categories, wallets, currencyMode]);
 
-  // Index cards only surface REALIZED P/L (which depends on actual trade
-  // prices, not end-of-period prices). Passing `null` for the period-end
-  // price is correct: it just flags unrealized as unavailable, which we
-  // ignore here. Avoiding the price lookup keeps this hot-path cheap when
-  // the portfolio has many assets.
   const assetsByPeriod = useMemo(() => {
     return PERIOD_KINDS.map((kind) => {
       const period = currentPeriod(kind);
+      const periodEndStr = formatJalaali(period.end);
       let realizedToman = 0;
       let realizedUsd = 0;
+      let unrealizedToman = 0;
+      let unrealizedUsd = 0;
+      let unrealizedMissingCount = 0;
       let buyCount = 0;
       let sellCount = 0;
       for (const a of assets) {
+        const endPrice = effectivePriceAt(a, periodEndStr, dailyPrices, todayStr);
         const s = calculateAssetPeriodStats(
           a,
           transactions,
           period,
           usdRate,
-          null
+          endPrice
         );
         realizedToman += s.realizedToman;
         realizedUsd += s.realizedUsd;
+        if (s.unrealizedAvailable) {
+          unrealizedToman += s.unrealizedToman;
+          unrealizedUsd += s.unrealizedUsd;
+        } else {
+          unrealizedMissingCount += 1;
+        }
         buyCount += s.bought.count;
         sellCount += s.sold.count;
       }
-      return { kind, realizedToman, realizedUsd, buyCount, sellCount };
+      return {
+        kind,
+        totalToman: realizedToman + unrealizedToman,
+        totalUsd: realizedUsd + unrealizedUsd,
+        unrealizedMissingCount,
+        buyCount,
+        sellCount,
+      };
     });
-  }, [assets, transactions, usdRate]);
+  }, [assets, dailyPrices, transactions, usdRate, todayStr]);
 
   return (
     <div className="bg-[#161722] min-h-full">
@@ -124,15 +140,16 @@ export function ReportsIndexView() {
           <SectionHeader
             icon={<Coins size={16} className="text-amber-400" />}
             title="سود/زیان دارایی‌ها"
-            subtitle="محقق‌شده در دوره بر اساس تراکنش‌های خرید/فروش"
+            subtitle="کل سود/زیان دوره (محقق‌شده + باز)"
           />
           <div className="grid grid-cols-1 gap-2">
-            {assetsByPeriod.map(({ kind, realizedToman, realizedUsd, buyCount, sellCount }) => (
+            {assetsByPeriod.map(({ kind, totalToman, totalUsd, unrealizedMissingCount, buyCount, sellCount }) => (
               <AssetsPeriodCard
                 key={kind}
                 kind={kind}
-                realizedToman={realizedToman}
-                realizedUsd={realizedUsd}
+                totalToman={totalToman}
+                totalUsd={totalUsd}
+                unrealizedMissingCount={unrealizedMissingCount}
                 buyCount={buyCount}
                 sellCount={sellCount}
                 currencyMode={currencyMode}
@@ -221,15 +238,17 @@ function CashflowPeriodCard({
 
 function AssetsPeriodCard({
   kind,
-  realizedToman,
-  realizedUsd,
+  totalToman,
+  totalUsd,
+  unrealizedMissingCount,
   buyCount,
   sellCount,
   currencyMode,
 }: {
   kind: PeriodKind;
-  realizedToman: number;
-  realizedUsd: number;
+  totalToman: number;
+  totalUsd: number;
+  unrealizedMissingCount: number;
   buyCount: number;
   sellCount: number;
   currencyMode: CurrencyMode;
@@ -238,8 +257,8 @@ function AssetsPeriodCard({
   const href = `/reports/assets?period=${period}&d=${d}`;
   // Primary / secondary values swap with the global toggle so the card's
   // dominant line matches the active currency.
-  const primary = currencyMode === 'USD' ? realizedUsd : realizedToman;
-  const secondary = currencyMode === 'USD' ? realizedToman : realizedUsd;
+  const primary = currencyMode === 'USD' ? totalUsd : totalToman;
+  const secondary = currencyMode === 'USD' ? totalToman : totalUsd;
   const secondaryMode: CurrencyMode = currencyMode === 'USD' ? 'TOMAN' : 'USD';
   const positive = primary >= 0;
 
@@ -274,7 +293,12 @@ function AssetsPeriodCard({
             {formatCurrency(secondary, secondaryMode)})
           </span>
         </div>
-        <p className="text-[10px] text-slate-500 mt-0.5">سود/زیان محقق‌شده</p>
+        <p className="text-[10px] text-slate-500 mt-0.5">
+          سود/زیان کل
+          {unrealizedMissingCount > 0
+            ? ` · ${unrealizedMissingCount.toLocaleString('fa-IR')} دارایی بدون قیمت تاریخی`
+            : ''}
+        </p>
       </div>
       <ChevronLeft size={18} className="text-slate-600 group-hover:text-purple-400 self-center transition" />
     </Link>
