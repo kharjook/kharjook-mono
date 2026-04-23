@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/shared/lib/supabase/proxy-client';
 
-const PUBLIC_ROUTES = ['/login', '/register'];
+const PUBLIC_ROUTES = ['/login', '/register', '/api/prices/quotes'];
 
 export async function proxy(request: NextRequest) {
   const { response, user } = await updateSession(request);
