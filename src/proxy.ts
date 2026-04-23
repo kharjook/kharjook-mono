@@ -4,12 +4,16 @@ import { updateSession } from '@/shared/lib/supabase/proxy-client';
 const PUBLIC_ROUTES = ['/login', '/register', '/api/prices/quotes'];
 
 export async function proxy(request: NextRequest) {
-  const { response, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
   const isPublic = PUBLIC_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
+  if (isPublic) {
+    return NextResponse.next({ request });
+  }
+
+  const { response, user } = await updateSession(request);
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

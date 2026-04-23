@@ -68,6 +68,7 @@ export async function fetchProviderQuotes(slugs: string[]): Promise<ProviderQuot
     headers: {
       'content-type': 'application/json',
     },
+    credentials: 'omit',
     cache: 'no-store',
     body: JSON.stringify({ slugs: uniqueSlugs }),
   });
