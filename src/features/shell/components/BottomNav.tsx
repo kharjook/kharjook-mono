@@ -2,17 +2,17 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Activity, Home, Plus, Settings, Wallet } from 'lucide-react';
+import { Activity, CalendarDays, Home, Plus, Wallet } from 'lucide-react';
 import { useData } from '@/features/portfolio/PortfolioProvider';
 import { NavItem } from '@/features/shell/components/NavItem';
 
-type Tab = 'home' | 'assets' | 'wallets' | 'settings' | null;
+type Tab = 'home' | 'assets' | 'wallets' | 'deadlines' | null;
 
 function useTabState(pathname: string): Tab {
   if (pathname === '/') return 'home';
   if (pathname === '/assets' || pathname.startsWith('/assets/')) return 'assets';
   if (pathname === '/wallets' || pathname.startsWith('/wallets/')) return 'wallets';
-  if (pathname === '/settings') return 'settings';
+  if (pathname === '/deadlines' || pathname.startsWith('/deadlines/')) return 'deadlines';
   return null;
 }
 
@@ -62,10 +62,10 @@ export function BottomNav() {
           disabled={isLoadingData}
         />
         <NavItem
-          icon={<Settings size={22} />}
-          label="تنظیمات"
-          isActive={active === 'settings'}
-          onClick={() => router.push('/settings')}
+          icon={<CalendarDays size={22} />}
+          label="سررسید"
+          isActive={active === 'deadlines'}
+          onClick={() => router.push('/deadlines')}
         />
       </div>
     </nav>

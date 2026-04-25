@@ -16,6 +16,8 @@ export type TransactionType =
   | 'EXPENSE';
 
 export type CategoryKind = 'asset' | 'income' | 'expense';
+export type LoanType = 'expense' | 'loan';
+export type LoanIntervalPeriod = 'day' | 'week' | 'month' | 'year';
 
 export interface Category {
   id: string;
@@ -125,6 +127,43 @@ export interface Transaction {
    */
   amount_toman_at_time: number | null;
   amount_usd_at_time: number | null;
+}
+
+export interface Loan {
+  id: string;
+  user_id: string;
+  title: string;
+  type: LoanType;
+  category_id: string | null;
+  currency: Currency;
+  installment_amount: number;
+  total_amount: number | null;
+  loan_start_date_string: string;
+  first_due_date_string: string;
+  repeat_count: number;
+  interval_number: number;
+  interval_period: LoanIntervalPeriod;
+  auto_income_on_create: boolean;
+  auto_income_wallet_id: string | null;
+  description: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoanInstallment {
+  id: string;
+  user_id: string;
+  loan_id: string;
+  due_date_string: string;
+  amount: number;
+  sequence_no: number;
+  is_paid: boolean;
+  paid_at: string | null;
+  paid_transaction_id: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AssetStats {
