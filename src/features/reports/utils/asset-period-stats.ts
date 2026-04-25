@@ -206,6 +206,10 @@ export function calculateAssetPeriodStats(
    */
   periodEndPrice: EffectivePrice | null
 ): AssetPeriodStats {
+  if (asset.include_in_profit_loss === false) {
+    return emptyAssetPeriodStats(asset.id);
+  }
+
   // Filter to every asset-touching tx: BUY/SELL plus asset-side
   // INCOME/EXPENSE (which `buildPayload` writes with `asset_id`, `amount`,
   // `price_toman`, `usd_rate` populated so the replay math is uniform).

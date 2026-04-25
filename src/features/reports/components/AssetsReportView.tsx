@@ -69,7 +69,9 @@ export function AssetsReportView() {
   // frame. Memoization keeps it off the render hot path.
   const allStats = useMemo(() => {
     const periodEndStr = formatJalaali(period.end);
-    return assets.map((a) => {
+    return assets
+      .filter((a) => a.include_in_profit_loss !== false)
+      .map((a) => {
       const endPrice = effectivePriceAt(a, periodEndStr, dailyPrices, todayStr);
       return {
         asset: a,
@@ -81,7 +83,7 @@ export function AssetsReportView() {
           endPrice
         ),
       };
-    });
+      });
   }, [assets, transactions, period, usdRate, dailyPrices, todayStr]);
 
   const visible = assetFilter

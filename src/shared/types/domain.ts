@@ -45,6 +45,12 @@ export interface Asset {
    * must degrade to "manual" in UI.
    */
   price_source_id: string | null;
+  /**
+   * Reporting-only flag:
+   * - true: include this asset in profit/loss calculations
+   * - false: exclude from P/L, but still include in portfolio value
+   */
+  include_in_profit_loss: boolean;
   created_at?: string;
 }
 

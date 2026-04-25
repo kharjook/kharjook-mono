@@ -95,6 +95,7 @@ export function HomeTab() {
     let yearProfitMissingCount = 0;
 
     for (const asset of assets) {
+      if (asset.include_in_profit_loss === false) continue;
       const periodEndPrice = effectivePriceAt(
         asset,
         currentYearEnd,

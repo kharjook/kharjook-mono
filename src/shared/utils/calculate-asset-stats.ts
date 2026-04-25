@@ -103,18 +103,20 @@ export function calculateAssetStats(
       ? (profitLossToman / historicalCostToman) * 100
       : 0;
 
+  const includePnl = asset.include_in_profit_loss ?? true;
+
   return {
     totalAmount,
     totalCostToman,
     avgBuyPriceToman,
     currentValueToman,
     currentValueUsd,
-    profitLossToman,
-    profitLossUsd,
-    profitLossPercent,
-    realizedProfitToman,
-    realizedProfitUsd,
-    unrealizedProfitToman,
-    unrealizedProfitUsd,
+    profitLossToman: includePnl ? profitLossToman : 0,
+    profitLossUsd: includePnl ? profitLossUsd : 0,
+    profitLossPercent: includePnl ? profitLossPercent : 0,
+    realizedProfitToman: includePnl ? realizedProfitToman : 0,
+    realizedProfitUsd: includePnl ? realizedProfitUsd : 0,
+    unrealizedProfitToman: includePnl ? unrealizedProfitToman : 0,
+    unrealizedProfitUsd: includePnl ? unrealizedProfitUsd : 0,
   };
 }

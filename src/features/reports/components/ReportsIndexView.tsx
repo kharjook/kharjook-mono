@@ -62,6 +62,7 @@ export function ReportsIndexView() {
       let buyCount = 0;
       let sellCount = 0;
       for (const a of assets) {
+        if (a.include_in_profit_loss === false) continue;
         const endPrice = effectivePriceAt(a, periodEndStr, dailyPrices, todayStr);
         const s = calculateAssetPeriodStats(
           a,

@@ -41,6 +41,7 @@ export function ManageAssetsView() {
     categoryId: '',
     iconUrl: null as string | null,
     priceSourceId: '' as string,
+    includeInProfitLoss: true,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
@@ -101,6 +102,7 @@ export function ManageAssetsView() {
         unit: formData.unit,
         icon_url: formData.iconUrl,
         price_source_id: formData.priceSourceId || null,
+        include_in_profit_loss: formData.includeInProfitLoss,
       };
 
       if (editingId) {
@@ -142,6 +144,7 @@ export function ManageAssetsView() {
       categoryId: asset.category_id || '',
       iconUrl: asset.icon_url ?? null,
       priceSourceId: asset.price_source_id ?? '',
+      includeInProfitLoss: asset.include_in_profit_loss ?? true,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -154,6 +157,7 @@ export function ManageAssetsView() {
       categoryId: '',
       iconUrl: null,
       priceSourceId: '',
+      includeInProfitLoss: true,
     });
   };
 
@@ -312,6 +316,23 @@ export function ManageAssetsView() {
               در صورت انتخاب، قیمت از این منبع در صفحهٔ قیمت‌ها قابل به‌روزرسانی خواهد بود.
             </p>
           </div>
+
+          <label className="flex items-center justify-between bg-[#222436] border border-white/5 rounded-xl p-3 cursor-pointer">
+            <div>
+              <p className="text-sm text-slate-200">شامل در سود/زیان</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                خاموش: فقط در ارزش کل سبد لحاظ می‌شود
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={formData.includeInProfitLoss}
+              onChange={(e) =>
+                setFormData({ ...formData, includeInProfitLoss: e.target.checked })
+              }
+              className="accent-purple-600 w-4 h-4"
+            />
+          </label>
         </div>
 
         <button
@@ -356,6 +377,11 @@ export function ManageAssetsView() {
                   <p className="text-slate-500 text-xs mt-1 truncate">
                     {cat ? cat.name : 'بدون دسته'} • {asset.unit}
                   </p>
+                  {asset.include_in_profit_loss === false && (
+                    <span className="inline-block mt-1.5 text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+                      خارج از سود/زیان
+                    </span>
+                  )}
                   {source && (
                     <span className="inline-block mt-1.5 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/20 rounded-full px-2 py-0.5">
                       {source.label}

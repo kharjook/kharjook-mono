@@ -63,6 +63,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
       ? stats.unrealizedProfitUsd
       : stats.unrealizedProfitToman;
   const isUnrealizedProfit = displayUnrealized >= 0;
+  const pnlExcluded = asset.include_in_profit_loss === false;
 
   const deleteTx = async (id: string) => {
     if (!window.confirm('آیا از حذف این تراکنش مطمئن هستید؟')) return;
@@ -88,7 +89,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
       </div>
 
       <div className="p-6 space-y-6">
-        <div className="text-center py-6 bg-gradient-to-b from-purple-500/10 to-transparent rounded-3xl border border-purple-500/20">
+        <div className="text-center py-6 bg-linear-to-b from-purple-500/10 to-transparent rounded-3xl border border-purple-500/20">
           <div className="flex justify-center mb-3">
             <EntityIcon
               iconUrl={asset.icon_url}
@@ -110,6 +111,11 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             {formatCurrency(displayProfit, currencyMode)} (
             {stats.profitLossPercent.toFixed(2)}%)
           </div>
+          {pnlExcluded && (
+            <p className="text-[11px] text-amber-300/80 mt-2">
+              این دارایی از محاسبات سود/زیان مستثنا شده و فقط در ارزش کل لحاظ می‌شود.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -236,7 +242,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
 
       <button
         onClick={() => router.push(`/transactions/new?assetId=${asset.id}`)}
-        className="fixed bottom-6 right-1/2 translate-x-1/2 w-[calc(100%-3rem)] max-w-[calc(28rem-3rem)] bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-2xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.4)] transition-all flex justify-center items-center gap-2 z-30"
+        className="fixed bottom-6 right-1/2 translate-x-1/2 w-[calc(100%-3rem)] max-w-100 bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-2xl font-bold shadow-[0_4px_20px_rgba(147,51,234,0.4)] transition-all flex justify-center items-center gap-2 z-30"
       >
         <Plus size={20} />
         ثبت عملیات جدید
