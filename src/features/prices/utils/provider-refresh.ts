@@ -98,11 +98,13 @@ export async function fetchProviderQuotes(slugs: string[]): Promise<ProviderQuot
     body: JSON.stringify({ slugs: uniqueSlugs }),
   });
 
+  const raw = await response.text();
   if (!response.ok) {
-    throw new Error(`Provider quote request failed: ${response.status}`);
+    const hint = raw.slice(0, 400).trim() || '(empty body)';
+    throw new Error(`Provider quote request failed: ${response.status} — ${hint}`);
   }
 
-  const payload = (await response.json()) as FetchProviderQuotesResponse;
+  const payload = JSON.parse(raw) as FetchProviderQuotesResponse;
   return Array.isArray(payload.quotes) ? payload.quotes : [];
 }
 

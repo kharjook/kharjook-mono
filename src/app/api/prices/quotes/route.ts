@@ -5,11 +5,16 @@ import {
   findPriceSource,
   type PriceSource,
 } from '@/features/prices/constants/price-sources';
+import { fetchTgjuUsdToman } from './tgju-usd';
 
 export const runtime = 'nodejs';
+/** Vercel / long upstream chains (Jina + TGJU + Zarpay challenge). */
+export const maxDuration = 45;
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
+
+const UPSTREAM_TIMEOUT_MS = 14_000;
 
 interface ProviderQuote {
   slug: string;
@@ -31,24 +36,28 @@ interface AbanTetherMarketRow {
   active?: boolean;
 }
 
-const TGJU_USD_URL =
-  'https://r.jina.ai/http://www.tgju.org/profile/price_dollar_rl';
-
 async function fetchText(url: string, init?: RequestInit): Promise<string> {
-  const response = await fetch(url, {
-    ...init,
-    cache: 'no-store',
-    headers: {
-      'user-agent': USER_AGENT,
-      ...(init?.headers ?? {}),
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        'user-agent': USER_AGENT,
+        ...(init?.headers ?? {}),
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(`Remote fetch failed: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      throw new Error(`Remote fetch failed: ${response.status} ${response.statusText}`);
+    }
+
+    return response.text();
+  } finally {
+    clearTimeout(timer);
   }
-
-  return response.text();
 }
 
 function solveZarpayCookieHeader(html: string): string {
@@ -141,29 +150,6 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
   return markets;
 }
 
-async function fetchTgjuUsdToman(): Promise<number> {
-  const payload = await fetchText(TGJU_USD_URL, {
-    headers: {
-      accept: 'text/plain, text/markdown;q=0.9, */*;q=0.8',
-    },
-  });
-
-  // TGJU publishes the profile value in RIAL on the page. We store
-  // currency_rates in TOMAN, so divide by 10 before returning.
-  const currentMatch =
-    payload.match(/###\s*نرخ فعلی:?\s*:?\s*([0-9,]+)/u) ??
-    payload.match(/\|\s*دلار\s*\|\s*([0-9,]+)\s*\|/u);
-
-  const raw = currentMatch?.[1]?.replaceAll(',', '') ?? '';
-  const rial = Number(raw);
-
-  if (!Number.isFinite(rial) || rial <= 0) {
-    throw new Error('TGJU USD price could not be parsed.');
-  }
-
-  return rial / 10;
-}
-
 function toZarpayQuote(
   source: PriceSource,
   market: ZarpayCoinRow[]
@@ -239,10 +225,21 @@ function toAppDollarQuote(source: PriceSource, usdToman: number): ProviderQuote 
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { slugs?: unknown };
-    const requestedSlugs = Array.isArray(body?.slugs)
-      ? body.slugs.filter((value): value is string => typeof value === 'string')
-      : [];
+    let requestedSlugs: string[];
+    try {
+      const body = (await request.json()) as { slugs?: unknown };
+      requestedSlugs = Array.isArray(body?.slugs)
+        ? body.slugs.filter((value): value is string => typeof value === 'string')
+        : [];
+    } catch {
+      return NextResponse.json(
+        { error: 'INVALID_JSON', quotes: [] as ProviderQuote[] },
+        {
+          status: 400,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        }
+      );
+    }
 
     const sources = Array.from(
       new Map(
