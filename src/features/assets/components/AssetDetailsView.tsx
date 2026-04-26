@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity, ArrowRight, Edit3, Plus, Trash2 } from 'lucide-react';
 import { EntityIcon } from '@/shared/components/EntityIcon';
@@ -9,8 +10,12 @@ import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
-import { parseDateToNumber } from '@/shared/utils/parse-date';
+import { sortTransactionsNewestFirst } from '@/shared/utils/sort-transactions';
 import { DetailCard } from '@/features/assets/components/DetailCard';
+import {
+  TransactionHistoryTypeFilter,
+  type TxHistoryTypeFilter,
+} from '@/features/transactions/components/TransactionHistoryTypeFilter';
 
 const TYPE_LABELS: Record<string, string> = {
   BUY: 'خرید',
@@ -29,8 +34,24 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   const toast = useToast();
   const { assets, transactions, setTransactions } = useData();
   const { currencyMode, usdRate } = useUI();
+  const [txTypeFilter, setTxTypeFilter] = useState<TxHistoryTypeFilter>('ALL');
 
   const asset = assets.find((a) => a.id === assetId);
+
+  const assetTxsSorted = useMemo(() => {
+    const touching = transactions.filter(
+      (tx) =>
+        tx.asset_id === assetId ||
+        tx.source_asset_id === assetId ||
+        tx.target_asset_id === assetId
+    );
+    return sortTransactionsNewestFirst(touching);
+  }, [transactions, assetId]);
+
+  const visibleAssetTxs = useMemo(() => {
+    if (txTypeFilter === 'ALL') return assetTxsSorted;
+    return assetTxsSorted.filter((tx) => tx.type === txTypeFilter);
+  }, [assetTxsSorted, txTypeFilter]);
 
   if (!asset) {
     return (
@@ -41,21 +62,6 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
       </div>
     );
   }
-
-  const assetTxs = transactions
-    .filter(
-      (tx) =>
-        tx.asset_id === assetId ||
-        tx.source_asset_id === assetId ||
-        tx.target_asset_id === assetId
-    )
-    .slice()
-    .sort((a, b) => {
-      const dateDiff =
-        parseDateToNumber(a.date_string) - parseDateToNumber(b.date_string);
-      if (dateDiff !== 0) return dateDiff;
-      return a.id.localeCompare(b.id);
-    });
 
   const stats = calculateAssetStats(asset, transactions, currencyMode, usdRate);
 
@@ -204,11 +210,29 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
         </div>
 
         <div className="pt-6">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-3">
             <h3 className="text-lg font-semibold text-white">تاریخچه عملیات</h3>
           </div>
+          {assetTxsSorted.length > 0 && (
+            <div className="mb-4">
+              <TransactionHistoryTypeFilter
+                value={txTypeFilter}
+                onChange={setTxTypeFilter}
+              />
+            </div>
+          )}
           <div className="space-y-3">
-            {assetTxs.map((tx) => {
+            {assetTxsSorted.length === 0 && (
+              <div className="text-center text-slate-500 text-sm py-4">
+                تراکنشی ثبت نشده است.
+              </div>
+            )}
+            {assetTxsSorted.length > 0 && visibleAssetTxs.length === 0 && (
+              <div className="text-center text-slate-500 text-sm py-4">
+                تراکنشی با این نوع وجود ندارد.
+              </div>
+            )}
+            {visibleAssetTxs.map((tx) => {
               const isAcquire =
                 tx.type === 'BUY' ||
                 tx.type === 'INCOME' ||
@@ -269,11 +293,6 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
               </div>
             );
             })}
-            {assetTxs.length === 0 && (
-              <div className="text-center text-slate-500 text-sm py-4">
-                تراکنشی ثبت نشده است.
-              </div>
-            )}
           </div>
         </div>
       </div>

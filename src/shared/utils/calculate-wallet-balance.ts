@@ -1,5 +1,6 @@
 import type { Transaction, Wallet } from '@/shared/types/domain';
 import { parseDateToNumber } from '@/shared/utils/parse-date';
+import { compareTransactionsNewestFirst } from '@/shared/utils/sort-transactions';
 
 export interface WalletStats {
   /** Closing balance in the wallet's native currency. */
@@ -10,7 +11,7 @@ export interface WalletStats {
   expenseTotal: number;
   /** Net inflow (BUY proceeds + SELL proceeds + TRANSFER + INCOME) minus outflows. */
   netFlow: number;
-  /** Transactions touching this wallet on either side, ordered oldest → newest. */
+  /** Transactions touching this wallet on either side, newest → oldest (UI order). */
   transactions: Transaction[];
 }
 
@@ -52,11 +53,7 @@ export function calculateWalletStats(
     }
   }
 
-  // Oldest first so the UI can render a chronological history.
-  touching.sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+  touching.sort(compareTransactionsNewestFirst);
 
   return { balance, incomeTotal, expenseTotal, netFlow, transactions: touching };
 }

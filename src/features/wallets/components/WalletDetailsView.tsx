@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowDownRight,
@@ -23,6 +23,10 @@ import { formatCurrency } from '@/shared/utils/format-currency';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { DetailCard } from '@/features/assets/components/DetailCard';
+import {
+  TransactionHistoryTypeFilter,
+  type TxHistoryTypeFilter,
+} from '@/features/transactions/components/TransactionHistoryTypeFilter';
 
 const TYPE_LABELS: Record<TransactionType, string> = {
   BUY: 'خرید',
@@ -47,6 +51,7 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
     currencyRates,
   } = useData();
   const { currencyMode, usdRate } = useUI();
+  const [txTypeFilter, setTxTypeFilter] = useState<TxHistoryTypeFilter>('ALL');
 
   const wallet = wallets.find((w) => w.id === walletId);
 
@@ -54,6 +59,13 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
     () => (wallet ? calculateWalletStats(wallet, transactions) : null),
     [wallet, transactions]
   );
+
+  const visibleWalletTxs = useMemo(() => {
+    if (!stats) return [];
+    const txs = stats.transactions;
+    if (txTypeFilter === 'ALL') return txs;
+    return txs.filter((tx) => tx.type === txTypeFilter);
+  }, [stats, txTypeFilter]);
 
   if (!wallet || !stats) {
     return (
@@ -145,27 +157,37 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
         </div>
 
         <div className="pt-2">
-          <h3 className="text-lg font-semibold text-white mb-4">تاریخچه تراکنش‌ها</h3>
+          <h3 className="text-lg font-semibold text-white mb-3">تاریخچه تراکنش‌ها</h3>
+          {stats.transactions.length > 0 && (
+            <div className="mb-4">
+              <TransactionHistoryTypeFilter
+                value={txTypeFilter}
+                onChange={setTxTypeFilter}
+              />
+            </div>
+          )}
           <div className="space-y-3">
             {stats.transactions.length === 0 && (
               <div className="text-center text-slate-500 text-sm py-6">
                 هنوز تراکنشی برای این کیف پول ثبت نشده.
               </div>
             )}
-            {stats.transactions
-              .slice()
-              .reverse()
-              .map((tx) => (
-                <TxRow
-                  key={tx.id}
-                  tx={tx}
-                  wallet={wallet}
-                  wallets={wallets}
-                  assets={assets}
-                  onEdit={() => router.push(`/transactions/${tx.id}/edit`)}
-                  onDelete={() => deleteTx(tx.id)}
-                />
-              ))}
+            {stats.transactions.length > 0 && visibleWalletTxs.length === 0 && (
+              <div className="text-center text-slate-500 text-sm py-6">
+                تراکنشی با این نوع وجود ندارد.
+              </div>
+            )}
+            {visibleWalletTxs.map((tx) => (
+              <TxRow
+                key={tx.id}
+                tx={tx}
+                wallet={wallet}
+                wallets={wallets}
+                assets={assets}
+                onEdit={() => router.push(`/transactions/${tx.id}/edit`)}
+                onDelete={() => deleteTx(tx.id)}
+              />
+            ))}
           </div>
         </div>
       </div>
