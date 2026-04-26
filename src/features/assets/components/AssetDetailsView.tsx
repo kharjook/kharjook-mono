@@ -12,6 +12,14 @@ import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import { parseDateToNumber } from '@/shared/utils/parse-date';
 import { DetailCard } from '@/features/assets/components/DetailCard';
 
+const TYPE_LABELS: Record<string, string> = {
+  BUY: 'خرید',
+  SELL: 'فروش',
+  TRANSFER: 'انتقال',
+  INCOME: 'درآمد',
+  EXPENSE: 'هزینه',
+};
+
 export interface AssetDetailsViewProps {
   assetId: string;
 }
@@ -35,7 +43,12 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   }
 
   const assetTxs = transactions
-    .filter((tx) => tx.asset_id === assetId)
+    .filter(
+      (tx) =>
+        tx.asset_id === assetId ||
+        tx.source_asset_id === assetId ||
+        tx.target_asset_id === assetId
+    )
     .slice()
     .sort((a, b) => {
       const dateDiff =
@@ -195,18 +208,29 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             <h3 className="text-lg font-semibold text-white">تاریخچه عملیات</h3>
           </div>
           <div className="space-y-3">
-            {assetTxs.map((tx) => (
+            {assetTxs.map((tx) => {
+              const isAcquire =
+                tx.type === 'BUY' ||
+                tx.type === 'INCOME' ||
+                (tx.type === 'TRANSFER' && tx.target_asset_id === asset.id);
+              const accent = isAcquire ? 'bg-emerald-500' : 'bg-rose-500';
+              const amount =
+                tx.amount ??
+                (tx.type === 'BUY' || tx.type === 'INCOME'
+                  ? tx.target_amount
+                  : tx.source_amount);
+              return (
               <div
                 key={tx.id}
                 className="bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex flex-col gap-3 relative overflow-hidden group"
               >
                 <div
-                  className={`absolute left-0 top-0 bottom-0 w-1 ${tx.type === 'BUY' ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                  className={`absolute left-0 top-0 bottom-0 w-1 ${accent}`}
                 ></div>
                 <div className="flex justify-between items-start">
                   <div>
                     <span className="text-slate-200 font-medium text-sm">
-                      {tx.type === 'BUY' ? 'خرید' : 'فروش'}
+                      {TYPE_LABELS[tx.type] ?? tx.type}
                     </span>
                     <p className="text-slate-500 text-xs mt-1">
                       {latinizeDigits(tx.date_string)}
@@ -214,7 +238,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
                   </div>
                   <div className="text-left">
                     <p className="text-slate-200 font-bold text-sm" dir="ltr">
-                      {tx.amount} {asset.unit}
+                      {amount} {asset.unit}
                     </p>
                     <p className="text-slate-500 text-xs mt-1" dir="ltr">
                       {formatCurrency(tx.price_toman, 'TOMAN')}
@@ -243,7 +267,8 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
                   </div>
                 </div>
               </div>
-            ))}
+            );
+            })}
             {assetTxs.length === 0 && (
               <div className="text-center text-slate-500 text-sm py-4">
                 تراکنشی ثبت نشده است.
