@@ -155,12 +155,12 @@ export function PortfolioProvider({
       if (perRes.error) throw perRes.error;
       if (dpRes.error) throw dpRes.error;
 
-      let nextCategories = (catRes.data as Category[]) || [];
+      const nextCategories = (catRes.data as Category[]) || [];
       let nextAssets = (astRes.data as Asset[]) || [];
-      let nextTransactions = (txRes.data as Transaction[]) || [];
-      let nextWallets = (walRes.data as Wallet[]) || [];
+      const nextTransactions = (txRes.data as Transaction[]) || [];
+      const nextWallets = (walRes.data as Wallet[]) || [];
       let nextCurrencyRates = (rateRes.data as CurrencyRate[]) || [];
-      let nextPersons = (perRes.data as Person[]) || [];
+      const nextPersons = (perRes.data as Person[]) || [];
       let nextDailyPrices = (dpRes.data as DailyPrice[]) || [];
 
       if (includeExternal) {

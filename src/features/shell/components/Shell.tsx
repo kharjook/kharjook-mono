@@ -61,7 +61,10 @@ export function Shell({ children, modal }: ShellProps) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-hide pb-24">
+        <main
+          data-app-scroll="main"
+          className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-hide pb-24"
+        >
           {children}
         </main>
 

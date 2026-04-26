@@ -1,4 +1,5 @@
 import type { Transaction, Wallet } from '@/shared/types/domain';
+import { parseDateToNumber } from '@/shared/utils/parse-date';
 
 export interface WalletStats {
   /** Closing balance in the wallet's native currency. */
@@ -58,4 +59,31 @@ export function calculateWalletStats(
   );
 
   return { balance, incomeTotal, expenseTotal, netFlow, transactions: touching };
+}
+
+/** Wallet balance after applying only transactions on or before `throughDateStr`. */
+export function walletBalanceThroughDate(
+  wallet: Wallet,
+  transactions: Transaction[],
+  throughDateStr: string
+): number {
+  const limit = parseDateToNumber(throughDateStr);
+  let balance = Number(wallet.initial_balance) || 0;
+
+  for (const tx of transactions) {
+    if (parseDateToNumber(tx.date_string) > limit) continue;
+    const isSource = tx.source_wallet_id === wallet.id;
+    const isTarget = tx.target_wallet_id === wallet.id;
+    if (!isSource && !isTarget) continue;
+    if (isTarget) {
+      const v = Number(tx.target_amount) || 0;
+      balance += v;
+    }
+    if (isSource) {
+      const v = Number(tx.source_amount) || 0;
+      balance -= v;
+    }
+  }
+
+  return balance;
 }
