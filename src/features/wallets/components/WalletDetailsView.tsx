@@ -46,6 +46,7 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
   const {
     wallets,
     assets,
+    categories,
     transactions,
     setTransactions,
     currencyRates,
@@ -184,6 +185,7 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
                 wallet={wallet}
                 wallets={wallets}
                 assets={assets}
+                categories={categories}
                 onEdit={() => router.push(`/transactions/${tx.id}/edit`)}
                 onDelete={() => deleteTx(tx.id)}
               />
@@ -209,6 +211,7 @@ function TxRow({
   wallet,
   wallets,
   assets,
+  categories,
   onEdit,
   onDelete,
 }: {
@@ -216,6 +219,7 @@ function TxRow({
   wallet: Wallet;
   wallets: Wallet[];
   assets: Asset[];
+  categories: { id: string; name: string }[];
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -227,7 +231,7 @@ function TxRow({
   const isIn = sign > 0;
 
   // Counterparty resolution: show the "other side" of the transaction.
-  const counterparty = describeCounterparty(tx, wallet, wallets, assets);
+  const counterparty = describeCounterparty(tx, wallet, wallets, assets, categories);
 
   const accent = isIn ? 'bg-emerald-500' : 'bg-rose-500';
   const tone = isIn ? 'text-emerald-400' : 'text-rose-400';
@@ -291,7 +295,8 @@ function describeCounterparty(
   tx: Transaction,
   wallet: Wallet,
   wallets: Wallet[],
-  assets: Asset[]
+  assets: Asset[],
+  categories: { id: string; name: string }[]
 ): string {
   // Pick the side opposite to `wallet`.
   const isSource = tx.source_wallet_id === wallet.id;
@@ -306,8 +311,12 @@ function describeCounterparty(
     const a = assets.find((x) => x.id === otherAssetId);
     return a ? `→ ${a.name}` : '— دارایی حذف‌شده';
   }
-  // INCOME / EXPENSE have no counterparty entity, only a category.
-  if (tx.type === 'INCOME') return 'درآمد';
-  if (tx.type === 'EXPENSE') return 'هزینه';
+  // INCOME / EXPENSE have no endpoint counterparty; show category title.
+  if ((tx.type === 'INCOME' || tx.type === 'EXPENSE') && tx.category_id) {
+    const c = categories.find((x) => x.id === tx.category_id);
+    if (c) return c.name;
+  }
+  if (tx.type === 'INCOME') return 'درآمد بدون دسته';
+  if (tx.type === 'EXPENSE') return 'هزینه بدون دسته';
   return '';
 }

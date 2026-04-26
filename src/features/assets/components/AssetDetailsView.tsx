@@ -32,7 +32,7 @@ export interface AssetDetailsViewProps {
 export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   const router = useRouter();
   const toast = useToast();
-  const { assets, transactions, setTransactions } = useData();
+  const { assets, categories, transactions, setTransactions } = useData();
   const { currencyMode, usdRate } = useUI();
   const [txTypeFilter, setTxTypeFilter] = useState<TxHistoryTypeFilter>('ALL');
 
@@ -233,6 +233,10 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
               </div>
             )}
             {visibleAssetTxs.map((tx) => {
+              const categoryTitle =
+                (tx.type === 'INCOME' || tx.type === 'EXPENSE') && tx.category_id
+                  ? categories.find((c) => c.id === tx.category_id)?.name ?? null
+                  : null;
               const isAcquire =
                 tx.type === 'BUY' ||
                 tx.type === 'INCOME' ||
@@ -256,6 +260,11 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
                     <span className="text-slate-200 font-medium text-sm">
                       {TYPE_LABELS[tx.type] ?? tx.type}
                     </span>
+                    {categoryTitle && (
+                      <p className="text-slate-400 text-[11px] mt-0.5 truncate">
+                        {categoryTitle}
+                      </p>
+                    )}
                     <p className="text-slate-500 text-xs mt-1">
                       {latinizeDigits(tx.date_string)}
                     </p>

@@ -134,21 +134,32 @@ type PricingContext = {
 
 function pricingContextOf(form: FormState, wallets: Wallet[]): PricingContext {
   if (form.type === 'TRANSFER') {
-    const walletAssetTransfer =
-      ((form.sourceKind === 'wallet' &&
-        form.targetKind === 'asset' &&
-        form.sourceId &&
-        form.targetId) ||
-        (form.sourceKind === 'asset' &&
-          form.targetKind === 'wallet' &&
-          form.sourceId &&
-          form.targetId));
-    if (walletAssetTransfer) {
+    const walletToAsset =
+      form.sourceKind === 'wallet' &&
+      form.targetKind === 'asset' &&
+      !!form.sourceId &&
+      !!form.targetId;
+    const assetToWallet =
+      form.sourceKind === 'asset' &&
+      form.targetKind === 'wallet' &&
+      !!form.sourceId &&
+      !!form.targetId;
+    if (walletToAsset) {
       return {
         needsPrice: true,
         showTomanPrice: false,
         needsUsdRate: true,
         priceLabel: '',
+        endpointKind: 'asset',
+        walletCurrency: null,
+      };
+    }
+    if (assetToWallet) {
+      return {
+        needsPrice: true,
+        showTomanPrice: true,
+        needsUsdRate: true,
+        priceLabel: 'قیمت فروش هر واحد (تومان)',
         endpointKind: 'asset',
         walletCurrency: null,
       };
@@ -523,7 +534,11 @@ function recomputeTransferTarget(
       usdRate,
       next.usdRate
     );
-    const assetPrice = Number(sourceAsset.price_toman);
+    const overridePrice = Number(next.priceToman);
+    const assetPrice =
+      Number.isFinite(overridePrice) && overridePrice > 0
+        ? overridePrice
+        : Number(sourceAsset.price_toman);
     if (!(walletRate > 0) || !(assetPrice > 0)) return next;
     return { ...next, targetAmount: canonicalNumber((srcAmount * assetPrice) / walletRate) };
   }
@@ -834,7 +849,13 @@ function buildPayload(
               form.usdRate
             )
           : 0;
-        const toman = Number.isFinite(money) && Number.isFinite(walletRate) ? money * walletRate : 0;
+        const explicitPrice = Number(form.priceToman);
+        const tomanFromPrice =
+          Number.isFinite(explicitPrice) && explicitPrice > 0 && qty > 0
+            ? qty * explicitPrice
+            : 0;
+        const tomanFromMoney = Number.isFinite(money) && Number.isFinite(walletRate) ? money * walletRate : 0;
+        const toman = tomanFromPrice > 0 ? tomanFromPrice : tomanFromMoney;
         if (qty > 0 && toman > 0) {
           base.asset_id = form.sourceId;
           base.amount = qty;
@@ -1387,6 +1408,7 @@ function TransactionFormRow({
           key === 'targetId' ||
           key === 'sourceKind' ||
           key === 'targetKind' ||
+          key === 'priceToman' ||
           key === 'usdRate')
       ) {
         return recomputeTransferTarget(next, wallets, assets, currencyRates, usdRate);
@@ -1665,7 +1687,7 @@ function TransactionFormRow({
         )}
 
         {/* Price fields (BUY/SELL; INCOME/EXPENSE when priced; TRANSFER
-            wallet↔asset: USD rate only — see pricingContextOf). */}
+            wallet→asset: USD rate only, asset→wallet: sell price + USD rate). */}
         {pricing.needsPrice && (
           <PriceFields
             priceLabel={pricing.priceLabel}
@@ -1687,13 +1709,11 @@ function TransactionFormRow({
           />
         )}
 
-        {/* Secondary editable amount — only for cross-currency TRANSFER */}
+        {/* Secondary editable amount — only for cross-currency wallet↔wallet TRANSFER */}
         {form.type === 'TRANSFER' &&
-          !(
-            sourceWallet &&
-            targetWallet &&
-            sourceWallet.currency === targetWallet.currency
-          ) && (
+          sourceWallet &&
+          targetWallet &&
+          sourceWallet.currency !== targetWallet.currency && (
             <CrossCurrencyTargetField
               value={form.targetAmount}
               targetWallet={targetWallet}
