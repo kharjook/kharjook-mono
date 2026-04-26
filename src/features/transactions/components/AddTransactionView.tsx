@@ -1709,11 +1709,19 @@ function TransactionFormRow({
           />
         )}
 
-        {/* Secondary editable amount — only for cross-currency wallet↔wallet TRANSFER */}
+        {/* Secondary editable amount — shown when target cannot be auto-derived. */}
         {form.type === 'TRANSFER' &&
-          sourceWallet &&
-          targetWallet &&
-          sourceWallet.currency !== targetWallet.currency && (
+          !(
+            // Auto-derived routes:
+            // - same-currency wallet↔wallet mirrors source amount
+            // - wallet→asset derives units from money+price
+            // - asset→wallet derives money from qty+price
+            (sourceWallet &&
+              targetWallet &&
+              sourceWallet.currency === targetWallet.currency) ||
+            (sourceWallet && targetAsset) ||
+            (sourceAsset && targetWallet)
+          ) && (
             <CrossCurrencyTargetField
               value={form.targetAmount}
               targetWallet={targetWallet}
