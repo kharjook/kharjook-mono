@@ -63,11 +63,25 @@ export function EndpointSheetPicker({
   const assetHoldings = useMemo(() => {
     if (!allow.includes('asset')) return new Map<string, number>();
     // Lightweight fold — we don't need PnL here, just current holdings.
+    // Must support both legacy BUY/SELL rows and polymorphic asset-side
+    // INCOME/EXPENSE rows.
     const map = new Map<string, number>();
     for (const tx of transactions) {
-      if (!tx.asset_id || !tx.amount) continue;
-      if (tx.type === 'BUY') map.set(tx.asset_id, (map.get(tx.asset_id) ?? 0) + Number(tx.amount));
-      else if (tx.type === 'SELL') map.set(tx.asset_id, (map.get(tx.asset_id) ?? 0) - Number(tx.amount));
+      const isAcquire = tx.type === 'BUY' || tx.type === 'INCOME';
+      const isDispose = tx.type === 'SELL' || tx.type === 'EXPENSE';
+      if (!isAcquire && !isDispose) continue;
+
+      const assetId = isAcquire
+        ? tx.target_asset_id ?? tx.asset_id
+        : tx.source_asset_id ?? tx.asset_id;
+      if (!assetId) continue;
+
+      const rawAmount = tx.amount ?? (isAcquire ? tx.target_amount : tx.source_amount);
+      const amount = Number(rawAmount);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+
+      const next = (map.get(assetId) ?? 0) + (isAcquire ? amount : -amount);
+      map.set(assetId, next);
     }
     return map;
   }, [transactions, allow]);

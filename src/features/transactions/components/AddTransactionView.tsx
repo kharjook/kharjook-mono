@@ -432,13 +432,23 @@ function recomputeMoneySide(
   return { ...next, targetAmount: canonicalNumber((src * price) / rate) };
 }
 
-/** Holdings of an asset across existing transactions (legacy columns only). */
+/** Holdings of an asset across existing transactions. */
 function assetHolding(assetId: string, transactions: Transaction[]): number {
   let total = 0;
   for (const tx of transactions) {
-    if (tx.asset_id !== assetId) continue;
-    if (tx.type === 'BUY') total += Number(tx.amount) || 0;
-    else if (tx.type === 'SELL') total -= Number(tx.amount) || 0;
+    const isAcquire = tx.type === 'BUY' || tx.type === 'INCOME';
+    const isDispose = tx.type === 'SELL' || tx.type === 'EXPENSE';
+    if (!isAcquire && !isDispose) continue;
+
+    const txAssetId = isAcquire
+      ? tx.target_asset_id ?? tx.asset_id
+      : tx.source_asset_id ?? tx.asset_id;
+    if (txAssetId !== assetId) continue;
+
+    const rawAmount = tx.amount ?? (isAcquire ? tx.target_amount : tx.source_amount);
+    const amount = Number(rawAmount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    total += isAcquire ? amount : -amount;
   }
   return total;
 }
