@@ -9,7 +9,10 @@ import { supabase } from '@/shared/lib/supabase/client';
 import type { CurrencyRate, DailyPrice } from '@/shared/types/domain';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
-import { fetchProviderQuotes } from '@/features/prices/utils/provider-refresh';
+import {
+  fetchProviderQuotes,
+  mergeGlobalUsdDollarQuotes,
+} from '@/features/prices/utils/provider-refresh';
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
 
@@ -59,16 +62,24 @@ export function DailyPricesView() {
         .filter((slug): slug is string => !!slug),
     ];
 
-    const quotes = await fetchProviderQuotes(slugs);
+    const quotesRaw = await fetchProviderQuotes(slugs);
+    const usdQuoteFromFetch = quotesRaw.find((quote) => quote.slug === 'tgju.usd');
+    const nextUsdRate =
+      usdQuoteFromFetch && usdQuoteFromFetch.priceToman > 0
+        ? usdQuoteFromFetch.priceToman
+        : effectiveUsd;
+
+    const quotes = mergeGlobalUsdDollarQuotes(
+      quotesRaw,
+      refreshableAssets,
+      nextUsdRate
+    );
     if (quotes.length === 0) return 0;
 
     const quoteBySlug = new Map(quotes.map((quote) => [quote.slug, quote]));
-    const usdQuote = quoteBySlug.get('tgju.usd');
-    const nextUsdRate =
-      usdQuote && usdQuote.priceToman > 0 ? usdQuote.priceToman : effectiveUsd;
 
-    if (usdQuote && usdQuote.priceToman > 0) {
-      setLocalUsd(String(usdQuote.priceToman));
+    if (usdQuoteFromFetch && usdQuoteFromFetch.priceToman > 0) {
+      setLocalUsd(String(usdQuoteFromFetch.priceToman));
     }
 
     setLocalPrices((prev) => {

@@ -19,7 +19,10 @@ import type { RateCurrency } from '@/shared/types/domain';
  *     AND `currency_rates.USD.toman_per_unit`). This is wired in the fetch
  *     layer later; catalog just declares intent here.
  */
-export type PriceSourceProvider = 'abantether' | 'tgju' | 'zarpay';
+export type PriceSourceProvider = 'abantether' | 'app' | 'tgju' | 'zarpay';
+
+/** Synthetic source: asset unit priced at the app’s global USD/Toman rate. */
+export const APP_GLOBAL_USD_SLUG = 'app.dollar' as const;
 
 export interface PriceSource {
   slug: string;
@@ -36,6 +39,13 @@ export interface PriceSource {
 }
 
 export const PRICE_SOURCES: readonly PriceSource[] = [
+  {
+    slug: APP_GLOBAL_USD_SLUG,
+    provider: 'app',
+    label: 'دلار',
+    fetchKey: 'GLOBAL_USD',
+    updatesRate: null,
+  },
   {
     slug: 'tgju.usd',
     provider: 'tgju',

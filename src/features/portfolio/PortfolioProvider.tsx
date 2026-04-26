@@ -19,6 +19,7 @@ import {
   mergeById,
   mergeCurrencyRates,
   mergeDailyPrices,
+  mergeGlobalUsdDollarQuotes,
   persistCurrencyRate,
   persistProviderQuotes,
 } from '@/features/prices/utils/provider-refresh';
@@ -173,8 +174,8 @@ export function PortfolioProvider({
           );
 
           if (providerSlugs.length > 0) {
-            const quotes = await fetchProviderQuotes(providerSlugs);
-            const usdQuote = quotes.find((quote) => quote.slug === 'tgju.usd');
+            const quotesRaw = await fetchProviderQuotes(providerSlugs);
+            const usdQuote = quotesRaw.find((quote) => quote.slug === 'tgju.usd');
             const effectiveUsdRate =
               usdQuote?.priceToman && usdQuote.priceToman > 0
                 ? usdQuote.priceToman
@@ -193,6 +194,11 @@ export function PortfolioProvider({
             }
 
             if (effectiveUsdRate > 0) {
+              const quotes = mergeGlobalUsdDollarQuotes(
+                quotesRaw,
+                nextAssets,
+                effectiveUsdRate
+              );
               const persisted = await persistProviderQuotes({
                 userId: user.id,
                 assets: nextAssets,

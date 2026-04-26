@@ -1,6 +1,7 @@
 'use client';
 
 import { supabase } from '@/shared/lib/supabase/client';
+import { APP_GLOBAL_USD_SLUG } from '@/features/prices/constants/price-sources';
 import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
 import type {
   Asset,
@@ -57,6 +58,30 @@ export function mergeCurrencyRates(
   const map = new Map(prev.map((rate) => [rate.currency, rate]));
   for (const rate of next) map.set(rate.currency, rate);
   return Array.from(map.values());
+}
+
+/**
+ * Ensures a quote for {@link APP_GLOBAL_USD_SLUG} exists whenever any asset uses
+ * it, using the same canonical USD/Toman rate as the rest of the app (TGJU when
+ * available, otherwise the caller’s fallback).
+ */
+export function mergeGlobalUsdDollarQuotes(
+  quotes: ProviderQuote[],
+  assets: { price_source_id?: string | null }[],
+  usdTomanPerUnit: number
+): ProviderQuote[] {
+  if (!(usdTomanPerUnit > 0)) return quotes;
+  const needs = assets.some((a) => a.price_source_id === APP_GLOBAL_USD_SLUG);
+  if (!needs) return quotes;
+
+  const merged = quotes.filter((q) => q.slug !== APP_GLOBAL_USD_SLUG);
+  merged.push({
+    slug: APP_GLOBAL_USD_SLUG,
+    provider: 'app',
+    priceToman: usdTomanPerUnit,
+    fetchedAt: new Date().toISOString(),
+  });
+  return merged;
 }
 
 export async function fetchProviderQuotes(slugs: string[]): Promise<ProviderQuote[]> {

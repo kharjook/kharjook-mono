@@ -1,6 +1,7 @@
 import { createContext, Script } from 'node:vm';
 import { NextResponse } from 'next/server';
 import {
+  APP_GLOBAL_USD_SLUG,
   findPriceSource,
   type PriceSource,
 } from '@/features/prices/constants/price-sources';
@@ -224,6 +225,18 @@ function toTgjuQuote(source: PriceSource, usdToman: number): ProviderQuote | nul
   };
 }
 
+function toAppDollarQuote(source: PriceSource, usdToman: number): ProviderQuote | null {
+  if (source.provider !== 'app' || source.slug !== APP_GLOBAL_USD_SLUG) return null;
+  if (!Number.isFinite(usdToman) || usdToman <= 0) return null;
+
+  return {
+    slug: source.slug,
+    provider: source.provider,
+    priceToman: usdToman,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { slugs?: unknown };
@@ -251,13 +264,18 @@ export async function POST(request: Request) {
       (source) => source.provider === 'abantether'
     );
     const tgjuSources = sources.filter((source) => source.provider === 'tgju');
+    const appDollarSources = sources.filter(
+      (source) => source.provider === 'app' && source.slug === APP_GLOBAL_USD_SLUG
+    );
     const zarpaySources = sources.filter((source) => source.provider === 'zarpay');
+    const needsTgjuUsdToman =
+      tgjuSources.length > 0 || appDollarSources.length > 0;
     // Provider outages should degrade partially, not take down the whole API.
     const [abanTetherRes, tgjuRes, zarpayRes] = await Promise.allSettled([
       abanTetherSources.length > 0
         ? fetchAbanTetherMarkets()
         : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
-      tgjuSources.length > 0 ? fetchTgjuUsdToman() : Promise.resolve(0),
+      needsTgjuUsdToman ? fetchTgjuUsdToman() : Promise.resolve(0),
       zarpaySources.length > 0 ? fetchZarpayCoins() : Promise.resolve([] as ZarpayCoinRow[]),
     ]);
     const abanTetherMarkets =
@@ -277,11 +295,13 @@ export async function POST(request: Request) {
 
     const quotes = sources
       .map((source) =>
-        source.provider === 'abantether'
-          ? toAbanTetherQuote(source, abanTetherMarkets)
-          : source.provider === 'tgju'
-            ? toTgjuQuote(source, tgjuUsdToman)
-            : toZarpayQuote(source, zarpayMarket)
+        source.provider === 'app'
+          ? toAppDollarQuote(source, tgjuUsdToman)
+          : source.provider === 'abantether'
+            ? toAbanTetherQuote(source, abanTetherMarkets)
+            : source.provider === 'tgju'
+              ? toTgjuQuote(source, tgjuUsdToman)
+              : toZarpayQuote(source, zarpayMarket)
       )
       .filter((quote): quote is ProviderQuote => !!quote);
 
