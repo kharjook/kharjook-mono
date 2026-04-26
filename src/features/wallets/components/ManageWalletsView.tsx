@@ -40,6 +40,7 @@ export function ManageWalletsView() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   if (!user) return null;
 
@@ -77,6 +78,11 @@ export function ManageWalletsView() {
           prev.map((w) => (w.id === form.editingId ? (data as Wallet) : w))
         );
       } else {
+        const nextOrder =
+          wallets.reduce(
+            (max, w) => Math.max(max, Number.isFinite(w.order_index) ? Number(w.order_index) : -1),
+            -1
+          ) + 1;
         const { data, error } = await supabase
           .from('wallets')
           .insert([
@@ -86,6 +92,7 @@ export function ManageWalletsView() {
               currency: form.currency,
               initial_balance: initial,
               icon_url: form.iconUrl,
+              order_index: nextOrder,
             },
           ])
           .select()
@@ -99,6 +106,34 @@ export function ManageWalletsView() {
       toast.error('خطا در ثبت کیف پول.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const reorderWallets = async (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const fromIndex = wallets.findIndex((w) => w.id === fromId);
+    const toIndex = wallets.findIndex((w) => w.id === toId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = wallets.slice();
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    const normalized = next.map((w, i) => ({ ...w, order_index: i }));
+    setWallets(normalized);
+    const updates = normalized.map((w) =>
+      supabase.from('wallets').update({ order_index: w.order_index }).eq('id', w.id)
+    );
+    const results = await Promise.all(updates);
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      console.error(err);
+      toast.error('ذخیره ترتیب کیف پول‌ها ناموفق بود.');
+      const { data } = await supabase
+        .from('wallets')
+        .select('*')
+        .is('archived_at', null)
+        .order('order_index', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+      if (data) setWallets(data as Wallet[]);
     }
   };
 
@@ -255,6 +290,14 @@ export function ManageWalletsView() {
           return (
             <div
               key={w.id}
+              draggable
+              onDragStart={() => setDraggingId(w.id)}
+              onDragEnd={() => setDraggingId(null)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (draggingId) void reorderWallets(draggingId, w.id);
+                setDraggingId(null);
+              }}
               className="bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex items-center justify-between"
             >
               <div className="flex items-center gap-3 min-w-0">

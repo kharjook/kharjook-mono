@@ -26,6 +26,7 @@ export interface Category {
   color: string;
   kind: CategoryKind;
   parent_id: string | null;
+  order_index?: number;
   created_at?: string;
 }
 
@@ -57,6 +58,7 @@ export interface Asset {
    * allocation chart; per-asset screens still show full stats. Omitted = included.
    */
   include_in_balance?: boolean;
+  order_index?: number;
   created_at?: string;
 }
 
@@ -68,6 +70,7 @@ export interface Wallet {
   initial_balance: number;
   icon_url: string | null;
   archived_at: string | null;
+  order_index?: number;
   created_at: string;
 }
 
@@ -75,6 +78,7 @@ export interface Person {
   id: string;
   user_id: string;
   name: string;
+  order_index?: number;
   created_at: string;
   updated_at: string;
 }

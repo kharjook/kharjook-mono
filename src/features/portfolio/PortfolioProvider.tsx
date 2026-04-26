@@ -120,10 +120,12 @@ export function PortfolioProvider({
         supabase
           .from('categories')
           .select('*')
+          .order('order_index', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true }),
         supabase
           .from('assets')
           .select('*')
+          .order('order_index', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true }),
         supabase
           .from('transactions')
@@ -133,11 +135,13 @@ export function PortfolioProvider({
           .from('wallets')
           .select('*')
           .is('archived_at', null)
+          .order('order_index', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true }),
         supabase.from('currency_rates').select('*'),
         supabase
           .from('persons')
           .select('*')
+          .order('order_index', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true }),
         supabase
           .from('daily_prices')

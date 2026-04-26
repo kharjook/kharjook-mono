@@ -18,6 +18,7 @@ export function ManagePersonsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const balances = useMemo(() => {
     const map = new Map<string, number>();
@@ -56,9 +57,14 @@ export function ManagePersonsView() {
         );
         toast.success('شخص ویرایش شد.');
       } else {
+        const nextOrder =
+          persons.reduce(
+            (max, p) => Math.max(max, Number.isFinite(p.order_index) ? Number(p.order_index) : -1),
+            -1
+          ) + 1;
         const { data, error } = await supabase
           .from('persons')
-          .insert({ user_id: user.id, name: trimmed })
+          .insert({ user_id: user.id, name: trimmed, order_index: nextOrder })
           .select()
           .single();
         if (error) throw error;
@@ -71,6 +77,34 @@ export function ManagePersonsView() {
       toast.error('خطا در ثبت شخص.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const reorderPersons = async (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const fromIndex = persons.findIndex((p) => p.id === fromId);
+    const toIndex = persons.findIndex((p) => p.id === toId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = persons.slice();
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    const normalized = next.map((p, i) => ({ ...p, order_index: i }));
+    setPersons(normalized);
+    const results = await Promise.all(
+      normalized.map((p) =>
+        supabase.from('persons').update({ order_index: p.order_index }).eq('id', p.id)
+      )
+    );
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      console.error(err);
+      toast.error('ذخیره ترتیب اشخاص ناموفق بود.');
+      const { data } = await supabase
+        .from('persons')
+        .select('*')
+        .order('order_index', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+      if (data) setPersons(data as Person[]);
     }
   };
 
@@ -167,6 +201,14 @@ export function ManagePersonsView() {
           return (
             <div
               key={person.id}
+              draggable
+              onDragStart={() => setDraggingId(person.id)}
+              onDragEnd={() => setDraggingId(null)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (draggingId) void reorderPersons(draggingId, person.id);
+                setDraggingId(null);
+              }}
               className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between ${
                 editingId === person.id ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'
               }`}

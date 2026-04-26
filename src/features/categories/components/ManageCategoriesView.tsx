@@ -54,6 +54,7 @@ export function ManageCategoriesView() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   // Categories scoped to the current tab.
   const scoped = useMemo(
@@ -155,6 +156,13 @@ export function ManageCategoriesView() {
           prev.map((c) => (c.id === form.editingId ? (data as Category) : c))
         );
       } else {
+        const nextOrder =
+          scoped
+            .filter((c) => c.parent_id === (activeKind === 'asset' ? null : form.parentId))
+            .reduce(
+              (max, c) => Math.max(max, Number.isFinite(c.order_index) ? Number(c.order_index) : -1),
+              -1
+            ) + 1;
         const { data, error } = await supabase
           .from('categories')
           .insert([
@@ -164,6 +172,7 @@ export function ManageCategoriesView() {
               color: form.color,
               kind: activeKind,
               parent_id: parentId,
+              order_index: nextOrder,
             },
           ])
           .select()
@@ -210,6 +219,43 @@ export function ManageCategoriesView() {
     } catch (err) {
       console.error(err);
       toast.error('خطا در حذف.');
+    }
+  };
+
+  const reorderCategorySiblings = async (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const from = scoped.find((c) => c.id === fromId);
+    const to = scoped.find((c) => c.id === toId);
+    if (!from || !to) return;
+    if ((from.parent_id ?? null) !== (to.parent_id ?? null)) return;
+    const siblings = scoped.filter((c) => (c.parent_id ?? null) === (from.parent_id ?? null));
+    const fromIndex = siblings.findIndex((c) => c.id === fromId);
+    const toIndex = siblings.findIndex((c) => c.id === toId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const nextSiblings = siblings.slice();
+    const [moved] = nextSiblings.splice(fromIndex, 1);
+    nextSiblings.splice(toIndex, 0, moved);
+    const withOrder = new Map<string, number>();
+    nextSiblings.forEach((c, idx) => withOrder.set(c.id, idx));
+    const nextCategories = categories.map((c) =>
+      withOrder.has(c.id) ? { ...c, order_index: withOrder.get(c.id) } : c
+    );
+    setCategories(nextCategories);
+    const results = await Promise.all(
+      nextSiblings.map((c, idx) =>
+        supabase.from('categories').update({ order_index: idx }).eq('id', c.id)
+      )
+    );
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      console.error(err);
+      toast.error('ذخیره ترتیب دسته‌ها ناموفق بود.');
+      const { data } = await supabase
+        .from('categories')
+        .select('*')
+        .order('order_index', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+      if (data) setCategories(data as Category[]);
     }
   };
 
@@ -367,6 +413,9 @@ export function ManageCategoriesView() {
             category={root}
             depth={0}
             childrenByParent={childrenByParent}
+            onDragStart={setDraggingId}
+            draggingId={draggingId}
+            onDropOnCategory={reorderCategorySiblings}
             onEdit={handleEdit}
             onDelete={handleDelete}
           />
@@ -395,6 +444,9 @@ interface CategoryNodeProps {
   category: Category;
   depth: number;
   childrenByParent: Map<string, Category[]>;
+  onDragStart: (id: string | null) => void;
+  draggingId: string | null;
+  onDropOnCategory: (fromId: string, toId: string) => Promise<void>;
   onEdit: (c: Category) => void;
   onDelete: (c: Category) => void;
 }
@@ -403,6 +455,9 @@ function CategoryNode({
   category,
   depth,
   childrenByParent,
+  onDragStart,
+  draggingId,
+  onDropOnCategory,
   onEdit,
   onDelete,
 }: CategoryNodeProps) {
@@ -411,6 +466,14 @@ function CategoryNode({
   return (
     <div className="space-y-2">
       <div
+        draggable
+        onDragStart={() => onDragStart(category.id)}
+        onDragEnd={() => onDragStart(null)}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => {
+          if (draggingId) void onDropOnCategory(draggingId, category.id);
+          onDragStart(null);
+        }}
         className={`bg-[#1A1B26] ${compact ? 'p-3' : 'p-4'} rounded-xl border border-white/5 flex items-center justify-between`}
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -449,6 +512,9 @@ function CategoryNode({
               category={kid}
               depth={depth + 1}
               childrenByParent={childrenByParent}
+              onDragStart={onDragStart}
+              draggingId={draggingId}
+              onDropOnCategory={onDropOnCategory}
               onEdit={onEdit}
               onDelete={onDelete}
             />

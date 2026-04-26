@@ -47,6 +47,7 @@ export function ManageAssetsView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [priceSourcePickerOpen, setPriceSourcePickerOpen] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const selectedCategory = useMemo(
     () =>
@@ -118,10 +119,15 @@ export function ManageAssetsView() {
         setAssets((prev) => prev.map((a) => (a.id === editingId ? data : a)));
         resetForm();
       } else {
+        const nextOrder =
+          assets.reduce(
+            (max, a) => Math.max(max, Number.isFinite(a.order_index) ? Number(a.order_index) : -1),
+            -1
+          ) + 1;
         const { data, error } = await supabase
           .from('assets')
           .insert([
-            { ...payload, user_id: user.id, price_toman: 0, price_usd: 0 },
+            { ...payload, user_id: user.id, price_toman: 0, price_usd: 0, order_index: nextOrder },
           ])
           .select()
           .single();
@@ -135,6 +141,34 @@ export function ManageAssetsView() {
       console.error(err);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const reorderAssets = async (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const fromIndex = assets.findIndex((a) => a.id === fromId);
+    const toIndex = assets.findIndex((a) => a.id === toId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = assets.slice();
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    const normalized = next.map((a, i) => ({ ...a, order_index: i }));
+    setAssets(normalized);
+    const results = await Promise.all(
+      normalized.map((a) =>
+        supabase.from('assets').update({ order_index: a.order_index }).eq('id', a.id)
+      )
+    );
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      console.error(err);
+      toast.error('ذخیره ترتیب دارایی‌ها ناموفق بود.');
+      const { data } = await supabase
+        .from('assets')
+        .select('*')
+        .order('order_index', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+      if (data) setAssets(data as Asset[]);
     }
   };
 
@@ -382,6 +416,14 @@ export function ManageAssetsView() {
           return (
             <div
               key={asset.id}
+              draggable
+              onDragStart={() => setDraggingId(asset.id)}
+              onDragEnd={() => setDraggingId(null)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (draggingId) void reorderAssets(draggingId, asset.id);
+                setDraggingId(null);
+              }}
               className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editingId === asset.id ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'}`}
             >
               <div className="flex items-center gap-3 min-w-0">
