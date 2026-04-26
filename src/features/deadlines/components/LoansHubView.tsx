@@ -15,12 +15,13 @@ import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Loan, LoanInstallment, Transaction } from '@/shared/types/domain';
 import { formatCurrency } from '@/shared/utils/format-currency';
-import { formatJalaaliHuman, parseJalaali } from '@/shared/utils/jalali';
+import { formatJalaaliHuman, JALALI_MONTHS, parseJalaali } from '@/shared/utils/jalali';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { ListSheetPicker } from '@/shared/components/ListSheetPicker';
 
 type TabKey = 'loans' | 'installments';
+type InstallmentFilter = 'all' | 'paid' | 'remaining';
 
 export function LoansHubView() {
   const router = useRouter();
@@ -37,6 +38,7 @@ export function LoansHubView() {
   const [settlementTarget, setSettlementTarget] = useState<LoanInstallment | null>(null);
   const [settlementWalletId, setSettlementWalletId] = useState<string | null>(null);
   const [isSettlementPickerOpen, setIsSettlementPickerOpen] = useState(false);
+  const [installmentFilter, setInstallmentFilter] = useState<InstallmentFilter>('all');
 
   const refresh = useCallback(async () => {
     if (!user) return;
@@ -89,6 +91,52 @@ export function LoansHubView() {
         (row): row is { installment: LoanInstallment; loan: Loan } => row.loan !== null
       );
   }, [installments, loansById]);
+
+  const filteredInstallmentRows = useMemo(() => {
+    if (installmentFilter === 'all') return installmentRows;
+    if (installmentFilter === 'paid') {
+      return installmentRows.filter((row) => row.installment.is_paid);
+    }
+    return installmentRows.filter((row) => !row.installment.is_paid);
+  }, [installmentFilter, installmentRows]);
+
+  const groupedInstallments = useMemo(() => {
+    const groups = new Map<string, {
+      key: string;
+      label: string;
+      rows: Array<{ installment: LoanInstallment; loan: Loan }>;
+    }>();
+    for (const row of filteredInstallmentRows) {
+      const parsed = parseJalaali(row.installment.due_date_string);
+      const key = parsed
+        ? `${parsed.jy}/${String(parsed.jm).padStart(2, '0')}`
+        : row.installment.due_date_string.slice(0, 7);
+      const label = parsed
+        ? `${JALALI_MONTHS[parsed.jm - 1]} ${String(parsed.jy).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[Number(c)]!)}`
+        : key;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        groups.set(key, { key, label, rows: [row] });
+      }
+    }
+    return Array.from(groups.values());
+  }, [filteredInstallmentRows]);
+
+  const remainingTotalDisplay = useMemo(() => {
+    const remainingRows = installmentRows.filter((row) => !row.installment.is_paid);
+    let totalToman = 0;
+    for (const row of remainingRows) {
+      const rate = tomanPerUnit(row.loan.currency, currencyRates);
+      if (!(rate > 0)) continue;
+      totalToman += row.installment.amount * rate;
+    }
+    if (currencyMode === 'USD') {
+      return usdRate > 0 ? totalToman / usdRate : 0;
+    }
+    return totalToman;
+  }, [installmentRows, currencyMode, currencyRates, usdRate]);
 
   const walletItems = useMemo(() => {
     return wallets.map((wallet) => ({
@@ -335,45 +383,98 @@ export function LoansHubView() {
         </div>
       ) : (
         <div className="space-y-3">
-          {installmentRows.map(({ installment, loan }) => {
-            const parsed = parseJalaali(installment.due_date_string);
-            const dueLabel = parsed ? formatJalaaliHuman(parsed) : installment.due_date_string;
-            const loanRate = tomanPerUnit(loan.currency, currencyRates);
-            const amountDisplay =
-              currencyMode === 'USD' && usdRate > 0
-                ? (installment.amount * loanRate) / usdRate
-                : installment.amount;
-            return (
-              <div
-                key={installment.id}
-                className="bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex items-center justify-between gap-3"
+          <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">جمع باقی‌مانده</span>
+              <span className="text-sm font-semibold text-slate-100" dir="ltr">
+                {formatCurrency(remainingTotalDisplay, currencyMode)}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setInstallmentFilter('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                  installmentFilter === 'all'
+                    ? 'bg-purple-600/25 border-purple-500/50 text-purple-200'
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                }`}
               >
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-100 truncate">{loan.title}</p>
-                  <p className="text-xs text-slate-500 mt-1">{dueLabel}</p>
-                  <p className="text-xs text-slate-300 mt-1" dir="ltr">
-                    {formatCurrency(amountDisplay, currencyMode)}
-                  </p>
-                </div>
+                همه
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallmentFilter('paid')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                  installmentFilter === 'paid'
+                    ? 'bg-purple-600/25 border-purple-500/50 text-purple-200'
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                }`}
+              >
+                تسویه شده
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallmentFilter('remaining')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                  installmentFilter === 'remaining'
+                    ? 'bg-purple-600/25 border-purple-500/50 text-purple-200'
+                    : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                }`}
+              >
+                باقی‌مانده
+              </button>
+            </div>
+          </div>
 
-                {installment.is_paid ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 shrink-0">
-                    <CheckCircle2 size={14} />
-                    تسویه‌شده
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => openSettle(installment)}
-                    className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition shrink-0"
+          {groupedInstallments.length === 0 ? (
+            <div className="text-center text-slate-500 text-sm py-6">
+              موردی با این فیلتر وجود ندارد.
+            </div>
+          ) : groupedInstallments.map((group) => (
+            <div key={group.key} className="space-y-2">
+              <h3 className="text-xs font-bold text-slate-400 px-1">{group.label}</h3>
+              {group.rows.map(({ installment, loan }) => {
+                const parsed = parseJalaali(installment.due_date_string);
+                const dueLabel = parsed ? formatJalaaliHuman(parsed) : installment.due_date_string;
+                const loanRate = tomanPerUnit(loan.currency, currencyRates);
+                const amountDisplay =
+                  currencyMode === 'USD' && usdRate > 0
+                    ? (installment.amount * loanRate) / usdRate
+                    : installment.amount;
+                return (
+                  <div
+                    key={installment.id}
+                    className="bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex items-center justify-between gap-3"
                   >
-                    <CreditCard size={14} />
-                    تسویه
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-100 truncate">{loan.title}</p>
+                      <p className="text-xs text-slate-500 mt-1">{dueLabel}</p>
+                      <p className="text-xs text-slate-300 mt-1" dir="ltr">
+                        {formatCurrency(amountDisplay, currencyMode)}
+                      </p>
+                    </div>
+
+                    {installment.is_paid ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 shrink-0">
+                        <CheckCircle2 size={14} />
+                        تسویه‌شده
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openSettle(installment)}
+                        className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition shrink-0"
+                      >
+                        <CreditCard size={14} />
+                        تسویه
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
