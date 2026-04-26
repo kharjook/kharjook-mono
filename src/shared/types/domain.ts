@@ -48,9 +48,15 @@ export interface Asset {
   /**
    * Reporting-only flag:
    * - true: include this asset in profit/loss calculations
-   * - false: exclude from P/L, but still include in portfolio value
+   * - false: exclude from P/L, but still include in portfolio value (unless
+   *   `include_in_balance` is also false).
    */
   include_in_profit_loss: boolean;
+  /**
+   * When false, current value is excluded from dashboard total balance and
+   * allocation chart; per-asset screens still show full stats. Omitted = included.
+   */
+  include_in_balance?: boolean;
   created_at?: string;
 }
 

@@ -64,6 +64,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
       : stats.unrealizedProfitToman;
   const isUnrealizedProfit = displayUnrealized >= 0;
   const pnlExcluded = asset.include_in_profit_loss === false;
+  const balanceExcluded = asset.include_in_balance === false;
 
   const deleteTx = async (id: string) => {
     if (!window.confirm('آیا از حذف این تراکنش مطمئن هستید؟')) return;
@@ -111,9 +112,21 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             {formatCurrency(displayProfit, currencyMode)} (
             {stats.profitLossPercent.toFixed(2)}%)
           </div>
-          {pnlExcluded && (
+          {balanceExcluded && (
+            <p className="text-[11px] text-sky-300/80 mt-2">
+              این دارایی در «ارزش کل سبد» و پراکندگی داشبورد لحاظ نمی‌شود؛ ارزش
+              نمایش‌داده‌شده همان ارزش بازاری این دارایی است.
+            </p>
+          )}
+          {pnlExcluded && !balanceExcluded && (
             <p className="text-[11px] text-amber-300/80 mt-2">
-              این دارایی از محاسبات سود/زیان مستثنا شده و فقط در ارزش کل لحاظ می‌شود.
+              این دارایی از محاسبات سود/زیان مستثنا شده و در ارزش کل سبد لحاظ
+              می‌شود.
+            </p>
+          )}
+          {pnlExcluded && balanceExcluded && (
+            <p className="text-[11px] text-amber-300/80 mt-2">
+              این دارایی از محاسبات سود/زیان هم مستثنا شده است.
             </p>
           )}
         </div>

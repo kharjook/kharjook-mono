@@ -45,24 +45,27 @@ export function HomeTab() {
         currencyMode,
         usdRate
       );
-      assetsValueToman += stats.currentValueToman;
-      assetsValueUsd += stats.currentValueUsd;
-      totalCostToman += stats.totalCostToman;
+      const inBalance = asset.include_in_balance !== false;
+      if (inBalance) {
+        assetsValueToman += stats.currentValueToman;
+        assetsValueUsd += stats.currentValueUsd;
+        totalCostToman += stats.totalCostToman;
 
-      if (stats.currentValueToman > 0 && asset.category_id) {
-        const cat = categories.find((c) => c.id === asset.category_id);
-        const catName = cat ? cat.name : 'بدون دسته';
-        const catColor = cat ? cat.color : '#64748b';
+        if (stats.currentValueToman > 0 && asset.category_id) {
+          const cat = categories.find((c) => c.id === asset.category_id);
+          const catName = cat ? cat.name : 'بدون دسته';
+          const catColor = cat ? cat.color : '#64748b';
 
-        const existing = categoryMap.get(asset.category_id);
-        if (existing) {
-          existing.value += stats.currentValueToman;
-        } else {
-          categoryMap.set(asset.category_id, {
-            name: catName,
-            value: stats.currentValueToman,
-            color: catColor,
-          });
+          const existing = categoryMap.get(asset.category_id);
+          if (existing) {
+            existing.value += stats.currentValueToman;
+          } else {
+            categoryMap.set(asset.category_id, {
+              name: catName,
+              value: stats.currentValueToman,
+              color: catColor,
+            });
+          }
         }
       }
     });

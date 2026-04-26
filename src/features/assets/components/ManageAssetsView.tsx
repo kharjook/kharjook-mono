@@ -42,6 +42,7 @@ export function ManageAssetsView() {
     iconUrl: null as string | null,
     priceSourceId: '' as string,
     includeInProfitLoss: true,
+    includeInBalance: true,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
@@ -103,6 +104,7 @@ export function ManageAssetsView() {
         icon_url: formData.iconUrl,
         price_source_id: formData.priceSourceId || null,
         include_in_profit_loss: formData.includeInProfitLoss,
+        include_in_balance: formData.includeInBalance,
       };
 
       if (editingId) {
@@ -145,6 +147,7 @@ export function ManageAssetsView() {
       iconUrl: asset.icon_url ?? null,
       priceSourceId: asset.price_source_id ?? '',
       includeInProfitLoss: asset.include_in_profit_loss ?? true,
+      includeInBalance: asset.include_in_balance ?? true,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -158,6 +161,7 @@ export function ManageAssetsView() {
       iconUrl: null,
       priceSourceId: '',
       includeInProfitLoss: true,
+      includeInBalance: true,
     });
   };
 
@@ -319,9 +323,27 @@ export function ManageAssetsView() {
 
           <label className="flex items-center justify-between bg-[#222436] border border-white/5 rounded-xl p-3 cursor-pointer">
             <div>
+              <p className="text-sm text-slate-200">شامل در ارزش کل سبد</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                خاموش: در جمع «ارزش کل سبد» و نمودار پراکندگی داشبورد لحاظ نمی‌شود
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={formData.includeInBalance}
+              onChange={(e) =>
+                setFormData({ ...formData, includeInBalance: e.target.checked })
+              }
+              className="accent-purple-600 w-4 h-4"
+            />
+          </label>
+
+          <label className="flex items-center justify-between bg-[#222436] border border-white/5 rounded-xl p-3 cursor-pointer">
+            <div>
               <p className="text-sm text-slate-200">شامل در سود/زیان</p>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                خاموش: فقط در ارزش کل سبد لحاظ می‌شود
+                خاموش: در گزارش سود/زیان لحاظ نمی‌شود؛ ارزش فعلی در صفحهٔ دارایی
+                همان است مگر «ارزش کل سبد» هم خاموش باشد.
               </p>
             </div>
             <input
@@ -377,6 +399,11 @@ export function ManageAssetsView() {
                   <p className="text-slate-500 text-xs mt-1 truncate">
                     {cat ? cat.name : 'بدون دسته'} • {asset.unit}
                   </p>
+                  {asset.include_in_balance === false && (
+                    <span className="inline-block mt-1.5 text-[10px] text-sky-300/90 bg-sky-500/10 border border-sky-500/20 rounded-full px-2 py-0.5">
+                      خارج از ارزش کل سبد
+                    </span>
+                  )}
                   {asset.include_in_profit_loss === false && (
                     <span className="inline-block mt-1.5 text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
                       خارج از سود/زیان

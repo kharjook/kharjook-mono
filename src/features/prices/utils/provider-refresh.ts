@@ -151,6 +151,8 @@ export async function persistProviderQuotes({
         unit: asset.unit,
         price_toman: quote.priceToman,
         price_usd: usdRate > 0 ? quote.priceToman / usdRate : 0,
+        include_in_profit_loss: asset.include_in_profit_loss ?? true,
+        include_in_balance: asset.include_in_balance ?? true,
       };
     });
 

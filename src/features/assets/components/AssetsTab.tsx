@@ -121,6 +121,11 @@ export function AssetsTab() {
                         <p className="text-xs text-slate-500 mt-1">
                           {stats.totalAmount} {asset.unit}
                         </p>
+                        {asset.include_in_balance === false && (
+                          <p className="text-[10px] text-sky-300/80 mt-1">
+                            خارج از ارزش کل سبد
+                          </p>
+                        )}
                         {asset.include_in_profit_loss === false && (
                           <p className="text-[10px] text-amber-300/80 mt-1">
                             خارج از سود/زیان

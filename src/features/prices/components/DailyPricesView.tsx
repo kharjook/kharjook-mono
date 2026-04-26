@@ -185,6 +185,8 @@ export function DailyPricesView() {
         unit: a.unit,
         price_toman: Number(localPrices[a.id]?.toman || 0),
         price_usd: Number(localPrices[a.id]?.usd || 0),
+        include_in_profit_loss: a.include_in_profit_loss ?? true,
+        include_in_balance: a.include_in_balance ?? true,
       }));
 
       // Persist USD rate alongside asset prices so they can never drift apart.
