@@ -106,7 +106,8 @@ const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
  *
  * Rule:
  *  - BUY/SELL always need both `priceToman` and editable `usdRate`.
- *  - TRANSFER never needs pricing (portfolio-neutral).
+ *  - TRANSFER wallet↔asset: editable `usdRate` only (`showTomanPrice: false`);
+ *    implied `price_toman` is derived at save from amounts + FX.
  *  - INCOME/EXPENSE need pricing WHENEVER the endpoint is not an IRT
  *    wallet. For IRT wallets, the amount is already in Toman and we
  *    use the current app USD rate as the default, but the user can edit it.
@@ -122,6 +123,8 @@ const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
  */
 type PricingContext = {
   needsPrice: boolean;
+  /** When false, only the USD rate row is shown (wallet↔asset transfer). */
+  showTomanPrice?: boolean;
   needsUsdRate: boolean;
   priceLabel: string;
   endpointKind: EndpointKind | null;
@@ -131,6 +134,25 @@ type PricingContext = {
 
 function pricingContextOf(form: FormState, wallets: Wallet[]): PricingContext {
   if (form.type === 'TRANSFER') {
+    const walletAssetTransfer =
+      ((form.sourceKind === 'wallet' &&
+        form.targetKind === 'asset' &&
+        form.sourceId &&
+        form.targetId) ||
+        (form.sourceKind === 'asset' &&
+          form.targetKind === 'wallet' &&
+          form.sourceId &&
+          form.targetId));
+    if (walletAssetTransfer) {
+      return {
+        needsPrice: true,
+        showTomanPrice: false,
+        needsUsdRate: true,
+        priceLabel: '',
+        endpointKind: 'asset',
+        walletCurrency: null,
+      };
+    }
     return {
       needsPrice: false,
       needsUsdRate: false,
@@ -450,10 +472,15 @@ function recomputeMoneySide(
 function walletRateForTransfer(
   wallet: Wallet,
   currencyRates: CurrencyRate[],
-  usdRate: number
+  globalUsdRate: number,
+  formUsdRate?: string
 ): number {
   if (wallet.currency === 'IRT') return 1;
-  if (wallet.currency === 'USD') return usdRate > 0 ? usdRate : tomanPerUnit('USD', currencyRates);
+  if (wallet.currency === 'USD') {
+    const o = formUsdRate != null ? Number(formUsdRate) : NaN;
+    const u = Number.isFinite(o) && o > 0 ? o : globalUsdRate;
+    return u > 0 ? u : tomanPerUnit('USD', currencyRates);
+  }
   return tomanPerUnit(wallet.currency, currencyRates);
 }
 
@@ -490,14 +517,24 @@ function recomputeTransferTarget(
   }
 
   if (sourceAsset && targetWallet) {
-    const walletRate = walletRateForTransfer(targetWallet, currencyRates, usdRate);
+    const walletRate = walletRateForTransfer(
+      targetWallet,
+      currencyRates,
+      usdRate,
+      next.usdRate
+    );
     const assetPrice = Number(sourceAsset.price_toman);
     if (!(walletRate > 0) || !(assetPrice > 0)) return next;
     return { ...next, targetAmount: canonicalNumber((srcAmount * assetPrice) / walletRate) };
   }
 
   if (sourceWallet && targetAsset) {
-    const walletRate = walletRateForTransfer(sourceWallet, currencyRates, usdRate);
+    const walletRate = walletRateForTransfer(
+      sourceWallet,
+      currencyRates,
+      usdRate,
+      next.usdRate
+    );
     const assetPrice = Number(targetAsset.price_toman);
     if (!(walletRate > 0) || !(assetPrice > 0)) return next;
     return { ...next, targetAmount: canonicalNumber((srcAmount * walletRate) / assetPrice) };
@@ -612,7 +649,7 @@ function validateForm(form: FormState, wallets: Wallet[]): string | null {
   }
 
   const ctx = pricingContextOf(form, wallets);
-  if (ctx.needsPrice) {
+  if (ctx.needsPrice && ctx.showTomanPrice !== false) {
     const p = Number(form.priceToman);
     if (!Number.isFinite(p) || p <= 0) return 'قیمت واحد (تومان) نامعتبر است.';
   }
@@ -790,7 +827,12 @@ function buildPayload(
         const money = Number(form.targetAmount);
         const targetWallet = wallets.find((w) => w.id === form.targetId);
         const walletRate = targetWallet
-          ? walletRateForTransfer(targetWallet, currencyRates, fallbackUsdRate)
+          ? walletRateForTransfer(
+              targetWallet,
+              currencyRates,
+              fallbackUsdRate,
+              form.usdRate
+            )
           : 0;
         const toman = Number.isFinite(money) && Number.isFinite(walletRate) ? money * walletRate : 0;
         if (qty > 0 && toman > 0) {
@@ -805,7 +847,12 @@ function buildPayload(
         const money = Number(form.sourceAmount);
         const sourceWallet = wallets.find((w) => w.id === form.sourceId);
         const walletRate = sourceWallet
-          ? walletRateForTransfer(sourceWallet, currencyRates, fallbackUsdRate)
+          ? walletRateForTransfer(
+              sourceWallet,
+              currencyRates,
+              fallbackUsdRate,
+              form.usdRate
+            )
           : 0;
         const toman = Number.isFinite(money) && Number.isFinite(walletRate) ? money * walletRate : 0;
         if (qty > 0 && toman > 0) {
@@ -1339,7 +1386,8 @@ function TransactionFormRow({
           key === 'sourceId' ||
           key === 'targetId' ||
           key === 'sourceKind' ||
-          key === 'targetKind')
+          key === 'targetKind' ||
+          key === 'usdRate')
       ) {
         return recomputeTransferTarget(next, wallets, assets, currencyRates, usdRate);
       }
@@ -1616,8 +1664,8 @@ function TransactionFormRow({
           </div>
         )}
 
-        {/* Price fields (BUY/SELL always; INCOME/EXPENSE when endpoint is
-            non-IRT wallet or asset — see pricingContextOf). */}
+        {/* Price fields (BUY/SELL; INCOME/EXPENSE when priced; TRANSFER
+            wallet↔asset: USD rate only — see pricingContextOf). */}
         {pricing.needsPrice && (
           <PriceFields
             priceLabel={pricing.priceLabel}
@@ -1625,6 +1673,7 @@ function TransactionFormRow({
             usdRate={form.usdRate}
             onPriceToman={(v) => updateField('priceToman', v)}
             onUsdRate={(v) => updateField('usdRate', v)}
+            showTomanPrice={pricing.showTomanPrice !== false}
             showUsdRate={pricing.needsUsdRate}
           />
         )}
@@ -1986,6 +2035,7 @@ function PriceFields({
   usdRate,
   onPriceToman,
   onUsdRate,
+  showTomanPrice = true,
   showUsdRate,
 }: {
   priceLabel: string;
@@ -1993,20 +2043,23 @@ function PriceFields({
   usdRate: string;
   onPriceToman: (v: string) => void;
   onUsdRate: (v: string) => void;
+  showTomanPrice?: boolean;
   showUsdRate: boolean;
 }) {
   return (
     <div className="space-y-3">
-      <div>
-        <label className="block text-xs text-slate-400 mb-1">{priceLabel || 'قیمت واحد (تومان)'}</label>
-        <FormattedNumberInput
-          value={priceToman}
-          onValueChange={onPriceToman}
-          className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm  focus:border-purple-500 outline-none text-left"
-          dir="ltr"
-          required
-        />
-      </div>
+      {showTomanPrice && (
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">{priceLabel || 'قیمت واحد (تومان)'}</label>
+          <FormattedNumberInput
+            value={priceToman}
+            onValueChange={onPriceToman}
+            className="w-full bg-[#1A1B26] border border-white/10 rounded-xl p-3 text-white text-sm  focus:border-purple-500 outline-none text-left"
+            dir="ltr"
+            required
+          />
+        </div>
+      )}
       {showUsdRate && (
         <div>
           <label className="block text-xs text-slate-400 mb-1">نرخ دلار در لحظه (تومان)</label>
