@@ -447,6 +447,65 @@ function recomputeMoneySide(
   return { ...next, targetAmount: canonicalNumber((src * price) / rate) };
 }
 
+function walletRateForTransfer(
+  wallet: Wallet,
+  currencyRates: CurrencyRate[],
+  usdRate: number
+): number {
+  if (wallet.currency === 'IRT') return 1;
+  if (wallet.currency === 'USD') return usdRate > 0 ? usdRate : tomanPerUnit('USD', currencyRates);
+  return tomanPerUnit(wallet.currency, currencyRates);
+}
+
+function recomputeTransferTarget(
+  next: FormState,
+  wallets: Wallet[],
+  assets: Asset[],
+  currencyRates: CurrencyRate[],
+  usdRate: number
+): FormState {
+  if (next.type !== 'TRANSFER') return next;
+  const srcAmount = Number(next.sourceAmount);
+  if (!Number.isFinite(srcAmount) || srcAmount <= 0) return next;
+  if (!next.sourceKind || !next.sourceId || !next.targetKind || !next.targetId) return next;
+
+  const sourceWallet = next.sourceKind === 'wallet'
+    ? wallets.find((w) => w.id === next.sourceId)
+    : null;
+  const targetWallet = next.targetKind === 'wallet'
+    ? wallets.find((w) => w.id === next.targetId)
+    : null;
+  const sourceAsset = next.sourceKind === 'asset'
+    ? assets.find((a) => a.id === next.sourceId)
+    : null;
+  const targetAsset = next.targetKind === 'asset'
+    ? assets.find((a) => a.id === next.targetId)
+    : null;
+
+  if (sourceWallet && targetWallet) {
+    if (sourceWallet.currency === targetWallet.currency) {
+      return { ...next, targetAmount: next.sourceAmount };
+    }
+    return next; // cross-currency wallet transfer stays user-editable
+  }
+
+  if (sourceAsset && targetWallet) {
+    const walletRate = walletRateForTransfer(targetWallet, currencyRates, usdRate);
+    const assetPrice = Number(sourceAsset.price_toman);
+    if (!(walletRate > 0) || !(assetPrice > 0)) return next;
+    return { ...next, targetAmount: canonicalNumber((srcAmount * assetPrice) / walletRate) };
+  }
+
+  if (sourceWallet && targetAsset) {
+    const walletRate = walletRateForTransfer(sourceWallet, currencyRates, usdRate);
+    const assetPrice = Number(targetAsset.price_toman);
+    if (!(walletRate > 0) || !(assetPrice > 0)) return next;
+    return { ...next, targetAmount: canonicalNumber((srcAmount * walletRate) / assetPrice) };
+  }
+
+  return next;
+}
+
 /** Holdings of an asset across existing transactions. */
 function assetHolding(assetId: string, transactions: Transaction[]): number {
   let total = 0;
@@ -1196,6 +1255,7 @@ function TransactionFormRow({
   const sourceAsset  = form.sourceKind === 'asset'  ? assets.find((a)  => a.id === form.sourceId) : undefined;
   const targetWallet = form.targetKind === 'wallet' ? wallets.find((w) => w.id === form.targetId) : undefined;
   const targetAsset  = form.targetKind === 'asset'  ? assets.find((a)  => a.id === form.targetId) : undefined;
+  const targetPerson = form.targetKind === 'person' ? persons.find((p) => p.id === form.targetId) : undefined;
 
   const srcBalance = sourceBalance(form, wallets, transactions, persons);
   const srcAmountNum = Number(form.sourceAmount);
@@ -1224,6 +1284,16 @@ function TransactionFormRow({
       ) {
         return recomputeMoneySide(next, wallets, currencyRates, usdRate);
       }
+      if (
+        next.type === 'TRANSFER' &&
+        (key === 'sourceAmount' ||
+          key === 'sourceId' ||
+          key === 'targetId' ||
+          key === 'sourceKind' ||
+          key === 'targetKind')
+      ) {
+        return recomputeTransferTarget(next, wallets, assets, currencyRates, usdRate);
+      }
       return next;
     });
   };
@@ -1237,6 +1307,9 @@ function TransactionFormRow({
         if (next.type === 'BUY' || next.type === 'SELL') {
           return recomputeMoneySide(next, wallets, currencyRates, usdRate);
         }
+        if (next.type === 'TRANSFER') {
+          return recomputeTransferTarget(next, wallets, assets, currencyRates, usdRate);
+        }
         return next;
       });
     };
@@ -1249,19 +1322,11 @@ function TransactionFormRow({
         ? { ...prev, sourceAmount: v }
         : { ...prev, targetAmount: v };
 
-      if (
-        prev.type === 'TRANSFER' &&
-        prev.sourceKind === 'wallet' &&
-        prev.targetKind === 'wallet' &&
-        sourceWallet &&
-        targetWallet &&
-        sourceWallet.currency === targetWallet.currency
-      ) {
-        next.targetAmount = v;
-      }
-
       if (next.type === 'BUY' || next.type === 'SELL') {
         return recomputeMoneySide(next, wallets, currencyRates, usdRate);
+      }
+      if (next.type === 'TRANSFER') {
+        return recomputeTransferTarget(next, wallets, assets, currencyRates, usdRate);
       }
       return next;
     });
@@ -1526,12 +1591,16 @@ function TransactionFormRow({
 
         {/* Secondary editable amount — only for cross-currency TRANSFER */}
         {form.type === 'TRANSFER' &&
-          sourceWallet &&
-          targetWallet &&
-          sourceWallet.currency !== targetWallet.currency && (
+          !(
+            sourceWallet &&
+            targetWallet &&
+            sourceWallet.currency === targetWallet.currency
+          ) && (
             <CrossCurrencyTargetField
               value={form.targetAmount}
               targetWallet={targetWallet}
+              targetAsset={targetAsset}
+              targetPerson={targetPerson}
               onChange={setTargetAmountRaw}
             />
           )}
@@ -1833,13 +1902,19 @@ function DerivedAmountLine({
 function CrossCurrencyTargetField({
   value,
   targetWallet,
+  targetAsset,
+  targetPerson,
   onChange,
 }: {
   value: string;
-  targetWallet: Wallet;
+  targetWallet?: Wallet;
+  targetAsset?: Asset;
+  targetPerson?: Person;
   onChange: (v: string) => void;
 }) {
-  const unit = CURRENCY_META[targetWallet.currency].label;
+  const unit = targetWallet
+    ? CURRENCY_META[targetWallet.currency].label
+    : targetAsset?.unit ?? (targetPerson ? 'مقدار' : '');
   return (
     <div>
       <label className="block text-xs text-slate-400 mb-1">
