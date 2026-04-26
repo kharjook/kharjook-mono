@@ -36,6 +36,7 @@ export function LoansHubView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<LoanInstallment | null>(null);
   const [settlementWalletId, setSettlementWalletId] = useState<string | null>(null);
+  const [isSettlementPickerOpen, setIsSettlementPickerOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!user) return;
@@ -100,11 +101,13 @@ export function LoansHubView() {
   const openSettle = (installment: LoanInstallment) => {
     setSettlementTarget(installment);
     setSettlementWalletId(null);
+    setIsSettlementPickerOpen(true);
   };
 
   const closeSettle = () => {
     setSettlementTarget(null);
     setSettlementWalletId(null);
+    setIsSettlementPickerOpen(false);
   };
 
   const handleDeleteLoan = async (loan: Loan) => {
@@ -375,12 +378,15 @@ export function LoansHubView() {
       )}
 
       <ListSheetPicker
-        open={settlementTarget !== null}
-        onClose={closeSettle}
+        open={isSettlementPickerOpen}
+        onClose={() => setIsSettlementPickerOpen(false)}
         title="انتخاب کیف پول پرداخت"
         items={walletItems}
         value={settlementWalletId}
-        onSelect={(id) => setSettlementWalletId(id)}
+        onSelect={(id) => {
+          setSettlementWalletId(id);
+          setIsSettlementPickerOpen(false);
+        }}
       />
 
       {settlementTarget && (
@@ -400,6 +406,14 @@ export function LoansHubView() {
               ) : (
                 'ثبت تسویه'
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSettlementPickerOpen(true)}
+              disabled={isSubmitting}
+              className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm disabled:opacity-50"
+            >
+              انتخاب کیف پول
             </button>
             <button
               type="button"
