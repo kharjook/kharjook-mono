@@ -18,6 +18,7 @@ import {
   Folder,
   Plus,
   Trash2,
+  UserRound,
   Wallet as WalletIcon,
 } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
@@ -40,6 +41,7 @@ import type {
   Currency,
   CurrencyRate,
   DailyPrice,
+  Person,
   Transaction,
   TransactionType,
   Wallet,
@@ -93,9 +95,9 @@ type TypeShape = {
 const TYPE_SHAPES: Record<TransactionType, TypeShape> = {
   BUY:      { source: ['wallet'],          target: ['asset'],           needsCategory: null },
   SELL:     { source: ['asset'],           target: ['wallet'],          needsCategory: null },
-  TRANSFER: { source: ['wallet', 'asset'], target: ['wallet', 'asset'], needsCategory: null },
-  INCOME:   { source: null,                target: ['wallet', 'asset'], needsCategory: 'income' },
-  EXPENSE:  { source: ['wallet', 'asset'], target: null,                needsCategory: 'expense' },
+  TRANSFER: { source: ['wallet', 'asset', 'person'], target: ['wallet', 'asset', 'person'], needsCategory: null },
+  INCOME:   { source: null,                target: ['wallet', 'asset', 'person'], needsCategory: 'income' },
+  EXPENSE:  { source: ['wallet', 'asset', 'person'], target: null,                needsCategory: 'expense' },
 };
 
 /**
@@ -162,6 +164,15 @@ function pricingContextOf(form: FormState, wallets: Wallet[]): PricingContext {
       needsUsdRate: true,
       priceLabel: 'قیمت هر واحد دارایی (تومان)',
       endpointKind: 'asset',
+      walletCurrency: null,
+    };
+  }
+  if (kind === 'person') {
+    return {
+      needsPrice: false,
+      needsUsdRate: false,
+      priceLabel: '',
+      endpointKind: 'person',
       walletCurrency: null,
     };
   }
@@ -268,16 +279,20 @@ function endpointKindOfTx(tx: Transaction, side: 'source' | 'target'): EndpointK
   if (side === 'source') {
     if (tx.source_wallet_id) return 'wallet';
     if (tx.source_asset_id) return 'asset';
+    if (tx.source_person_id) return 'person';
     return null;
   }
   if (tx.target_wallet_id) return 'wallet';
   if (tx.target_asset_id) return 'asset';
+  if (tx.target_person_id) return 'person';
   return null;
 }
 
 function endpointIdOfTx(tx: Transaction, side: 'source' | 'target'): string | null {
-  if (side === 'source') return tx.source_wallet_id ?? tx.source_asset_id ?? null;
-  return tx.target_wallet_id ?? tx.target_asset_id ?? null;
+  if (side === 'source') {
+    return tx.source_wallet_id ?? tx.source_asset_id ?? tx.source_person_id ?? null;
+  }
+  return tx.target_wallet_id ?? tx.target_asset_id ?? tx.target_person_id ?? null;
 }
 
 function todayCanonicalJalali(): string {
@@ -456,7 +471,8 @@ function assetHolding(assetId: string, transactions: Transaction[]): number {
 function sourceBalance(
   form: FormState,
   wallets: Wallet[],
-  transactions: Transaction[]
+  transactions: Transaction[],
+  persons: { id: string }[]
 ): number | null {
   if (form.sourceKind === 'wallet' && form.sourceId) {
     const w = wallets.find((x) => x.id === form.sourceId);
@@ -465,6 +481,20 @@ function sourceBalance(
   }
   if (form.sourceKind === 'asset' && form.sourceId) {
     return assetHolding(form.sourceId, transactions);
+  }
+  if (form.sourceKind === 'person' && form.sourceId) {
+    const personExists = persons.some((p) => p.id === form.sourceId);
+    if (!personExists) return null;
+    let balance = 0;
+    for (const tx of transactions) {
+      if (tx.target_person_id === form.sourceId) {
+        balance += Number(tx.target_amount) || 0;
+      }
+      if (tx.source_person_id === form.sourceId) {
+        balance -= Number(tx.source_amount) || 0;
+      }
+    }
+    return balance;
   }
   return null;
 }
@@ -485,8 +515,11 @@ function validateForm(form: FormState, wallets: Wallet[]): string | null {
     case 'TRANSFER':
       if (!form.sourceKind || !form.sourceId) return 'مبدأ را انتخاب کن.';
       if (!form.targetKind || !form.targetId) return 'مقصد را انتخاب کن.';
-      if (form.sourceKind !== form.targetKind) {
-        return 'انتقال فقط بین دو کیف پول یا بین دو دارایی ممکن است.';
+      if (form.sourceKind === 'asset' && form.targetKind === 'person') {
+        return 'انتقال دارایی به شخص مجاز نیست.';
+      }
+      if (form.sourceKind === 'person' && form.targetKind === 'asset') {
+        return 'انتقال از شخص به دارایی مجاز نیست.';
       }
       if (form.sourceId === form.targetId) return 'مبدأ و مقصد نباید یکی باشند.';
       break;
@@ -586,6 +619,9 @@ function computeAmountSnapshots(
         if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
         return computeFromAmountPrice(amount, price);
       }
+      if (form.targetKind === 'person') {
+        return computeFromAmountPrice(amount, 1);
+      }
       return { toman: null, usd: null };
     }
 
@@ -607,6 +643,9 @@ function computeAmountSnapshots(
         const price = Number(form.priceToman);
         if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
         return computeFromAmountPrice(amount, price);
+      }
+      if (form.sourceKind === 'person') {
+        return computeFromAmountPrice(amount, 1);
       }
       return { toman: null, usd: null };
     }
@@ -633,8 +672,10 @@ function buildPayload(
     note: form.note || null,
     source_wallet_id: null,
     source_asset_id: null,
+    source_person_id: null,
     target_wallet_id: null,
     target_asset_id: null,
+    target_person_id: null,
     source_amount: null,
     target_amount: null,
     category_id: null,
@@ -649,12 +690,14 @@ function buildPayload(
   const setSource = () => {
     if (form.sourceKind === 'wallet') base.source_wallet_id = form.sourceId;
     else if (form.sourceKind === 'asset') base.source_asset_id = form.sourceId;
+    else if (form.sourceKind === 'person') base.source_person_id = form.sourceId;
     const amount = Number(form.sourceAmount);
     if (Number.isFinite(amount) && amount > 0) base.source_amount = amount;
   };
   const setTarget = () => {
     if (form.targetKind === 'wallet') base.target_wallet_id = form.targetId;
     else if (form.targetKind === 'asset') base.target_asset_id = form.targetId;
+    else if (form.targetKind === 'person') base.target_person_id = form.targetId;
     const amount = Number(form.targetAmount);
     if (Number.isFinite(amount) && amount > 0) base.target_amount = amount;
   };
@@ -771,6 +814,7 @@ export function AddTransactionView({
   const {
     assets,
     wallets,
+    persons,
     categories,
     transactions,
     currencyRates,
@@ -1055,6 +1099,7 @@ export function AddTransactionView({
                 onToggleCollapsed={() => toggleCollapsed(idx)}
                 wallets={wallets}
                 assets={assets}
+                persons={persons}
                 categories={categories}
                 transactions={transactions}
                 currencyRates={currencyRates}
@@ -1080,6 +1125,7 @@ export function AddTransactionView({
           rows={rows}
           wallets={wallets}
           assets={assets}
+          persons={persons}
           categories={categories}
           style={sharedStyle}
         />
@@ -1115,6 +1161,7 @@ function TransactionFormRow({
   onToggleCollapsed,
   wallets,
   assets,
+  persons,
   categories,
   transactions,
   currencyRates,
@@ -1130,6 +1177,7 @@ function TransactionFormRow({
   onToggleCollapsed: () => void;
   wallets: Wallet[];
   assets: Asset[];
+  persons: Person[];
   categories: Category[];
   transactions: Transaction[];
   currencyRates: CurrencyRate[];
@@ -1149,10 +1197,11 @@ function TransactionFormRow({
   const targetWallet = form.targetKind === 'wallet' ? wallets.find((w) => w.id === form.targetId) : undefined;
   const targetAsset  = form.targetKind === 'asset'  ? assets.find((a)  => a.id === form.targetId) : undefined;
 
-  const srcBalance = sourceBalance(form, wallets, transactions);
+  const srcBalance = sourceBalance(form, wallets, transactions, persons);
   const srcAmountNum = Number(form.sourceAmount);
   const isInsufficient =
     form.type !== 'INCOME' &&
+    form.sourceKind !== 'person' &&
     srcBalance != null &&
     Number.isFinite(srcAmountNum) &&
     srcAmountNum > srcBalance;
@@ -1264,6 +1313,7 @@ function TransactionFormRow({
         onRemove={onRemove}
         wallets={wallets}
         assets={assets}
+        persons={persons}
         categories={categories}
       />
     );
@@ -1320,6 +1370,11 @@ function TransactionFormRow({
               kind={form.sourceKind}
               wallet={sourceWallet}
               asset={sourceAsset}
+              person={
+                form.sourceKind === 'person'
+                  ? persons.find((p) => p.id === form.sourceId)
+                  : undefined
+              }
               balance={srcBalance}
               insufficient={isInsufficient}
               optional={optionalSource}
@@ -1353,9 +1408,25 @@ function TransactionFormRow({
               kind={form.targetKind}
               wallet={targetWallet}
               asset={targetAsset}
+              person={
+                form.targetKind === 'person'
+                  ? persons.find((p) => p.id === form.targetId)
+                  : undefined
+              }
               balance={
                 form.targetKind === 'wallet' && targetWallet
                   ? calculateWalletStats(targetWallet, transactions).balance
+                  : form.targetKind === 'person' && form.targetId
+                    ? sourceBalance(
+                        {
+                          ...form,
+                          sourceKind: 'person',
+                          sourceId: form.targetId,
+                        },
+                        wallets,
+                        transactions,
+                        persons
+                      )
                   : null
               }
               insufficient={false}
@@ -1517,6 +1588,7 @@ function TransactionFormRow({
         }
         wallets={wallets}
         assets={assets}
+        persons={persons}
         transactions={transactions}
         onSelect={(kind, id) => {
           if (pickerOpen) selectEndpoint(pickerOpen)(kind, id);
@@ -1554,6 +1626,7 @@ function DirectionCard({
   kind,
   wallet,
   asset,
+  person,
   balance,
   insufficient,
   optional = false,
@@ -1563,13 +1636,14 @@ function DirectionCard({
   kind: EndpointKind | null;
   wallet?: Wallet;
   asset?: Asset;
+  person?: { name: string };
   balance: number | null;
   insufficient: boolean;
   optional?: boolean;
   onTap: () => void;
 }) {
   const filled = !!(wallet || asset);
-  const name = wallet?.name ?? asset?.name ?? 'انتخاب کنید';
+  const name = wallet?.name ?? asset?.name ?? person?.name ?? 'انتخاب کنید';
   const unit = wallet ? `${CURRENCY_META[wallet.currency].symbol} ${wallet.currency}` : asset?.unit ?? '';
 
   const borderClass = insufficient
@@ -1586,9 +1660,21 @@ function DirectionCard({
     >
       <EntityIcon
         iconUrl={wallet?.icon_url ?? asset?.icon_url ?? null}
-        fallback={kind === 'wallet' ? <WalletIcon size={18} /> : <Coins size={18} />}
-        bgColor={kind === 'asset' ? 'rgba(251, 191, 36, 0.12)' : 'rgba(168, 85, 247, 0.12)'}
-        color={kind === 'asset' ? '#fbbf24' : '#c084fc'}
+        fallback={
+          kind === 'wallet'
+            ? <WalletIcon size={18} />
+            : kind === 'asset'
+              ? <Coins size={18} />
+              : <UserRound size={18} />
+        }
+        bgColor={
+          kind === 'asset'
+            ? 'rgba(251, 191, 36, 0.12)'
+            : kind === 'person'
+              ? 'rgba(56, 189, 248, 0.12)'
+              : 'rgba(168, 85, 247, 0.12)'
+        }
+        color={kind === 'asset' ? '#fbbf24' : kind === 'person' ? '#7dd3fc' : '#c084fc'}
         className="w-10 h-10 shrink-0"
       />
       <div className="flex-1 min-w-0">
@@ -1603,7 +1689,9 @@ function DirectionCard({
           <p className={`text-[11px] mt-0.5  ${insufficient ? 'text-rose-400' : 'text-slate-500'}`} dir="ltr">
             {balance != null
               ? `${balance.toLocaleString('en-US', { maximumFractionDigits: wallet ? CURRENCY_META[wallet.currency].decimals : 6 })} ${unit.trim()}`
-              : unit}
+              : kind === 'person'
+                ? 'حساب شخص'
+                : unit}
           </p>
         )}
       </div>
@@ -1869,6 +1957,7 @@ function CollapsedRow({
   onRemove,
   wallets,
   assets,
+  persons,
   categories,
 }: {
   form: FormState;
@@ -1879,9 +1968,10 @@ function CollapsedRow({
   onRemove: () => void;
   wallets: Wallet[];
   assets: Asset[];
+  persons: Person[];
   categories: Category[];
 }) {
-  const summary = summarizeForm(form, wallets, assets, categories);
+  const summary = summarizeForm(form, wallets, assets, categories, persons);
   return (
     <div
       className={`rounded-2xl border ${style.accentBorder} bg-linear-to-b ${style.accentGradient} p-3 flex items-center gap-3`}
@@ -1912,19 +2002,24 @@ function summarizeForm(
   form: FormState,
   wallets: Wallet[],
   assets: Asset[],
-  categories: Category[]
+  categories: Category[],
+  persons: { id: string; name: string }[]
 ): string {
   const sourceName =
     form.sourceKind === 'wallet'
       ? wallets.find((w) => w.id === form.sourceId)?.name
       : form.sourceKind === 'asset'
         ? assets.find((a) => a.id === form.sourceId)?.name
+        : form.sourceKind === 'person'
+          ? persons.find((p) => p.id === form.sourceId)?.name
         : null;
   const targetName =
     form.targetKind === 'wallet'
       ? wallets.find((w) => w.id === form.targetId)?.name
       : form.targetKind === 'asset'
         ? assets.find((a) => a.id === form.targetId)?.name
+        : form.targetKind === 'person'
+          ? persons.find((p) => p.id === form.targetId)?.name
         : null;
 
   const srcAmt = Number(form.sourceAmount);
@@ -1958,12 +2053,14 @@ function PreviewPanel({
   rows,
   wallets,
   assets,
+  persons,
   categories,
   style,
 }: {
   rows: FormState[];
   wallets: Wallet[];
   assets: Asset[];
+  persons: Person[];
   categories: Category[];
   style: TypeStyle;
 }) {
@@ -1997,7 +2094,7 @@ function PreviewPanel({
           valid[i] ? (
             <p key={i} className="text-sm text-slate-100 leading-relaxed">
               {rows.length > 1 && <span className="text-slate-500">#{i + 1} · </span>}
-              {summarizeForm(r, wallets, assets, categories)}
+              {summarizeForm(r, wallets, assets, categories, persons)}
             </p>
           ) : null
         )}

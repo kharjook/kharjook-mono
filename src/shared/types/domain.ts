@@ -65,6 +65,14 @@ export interface Wallet {
   created_at: string;
 }
 
+export interface Person {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CurrencyRate {
   id: string;
   user_id: string;
@@ -106,8 +114,10 @@ export interface Transaction {
   // Polymorphic endpoints — exactly one side per type per CHECK constraint.
   source_wallet_id: string | null;
   source_asset_id: string | null;
+  source_person_id: string | null;
   target_wallet_id: string | null;
   target_asset_id: string | null;
+  target_person_id: string | null;
   source_amount: number | null;
   target_amount: number | null;
   category_id: string | null;

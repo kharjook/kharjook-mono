@@ -4,19 +4,21 @@ import { useMemo, useState } from 'react';
 import {
   Coins,
   Search,
+  UserRound,
   Wallet as WalletIcon,
 } from 'lucide-react';
 import { BottomSheet } from '@/shared/components/BottomSheet';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import type {
   Asset,
+  Person,
   Transaction,
   Wallet,
 } from '@/shared/types/domain';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 
-export type EndpointKind = 'wallet' | 'asset';
+export type EndpointKind = 'wallet' | 'asset' | 'person';
 
 export interface EndpointSheetPickerProps {
   open: boolean;
@@ -28,6 +30,7 @@ export interface EndpointSheetPickerProps {
   excludeIds?: string[];
   wallets: Wallet[];
   assets: Asset[];
+  persons: Person[];
   transactions: Transaction[];
   onSelect: (kind: EndpointKind, id: string) => void;
 }
@@ -40,6 +43,7 @@ export function EndpointSheetPicker({
   excludeIds = [],
   wallets,
   assets,
+  persons,
   transactions,
   onSelect,
 }: EndpointSheetPickerProps) {
@@ -97,6 +101,36 @@ export function EndpointSheetPicker({
           : a.name.toLowerCase().includes(q) || a.unit.toLowerCase().includes(q)
       );
   }, [assets, allow, exclude, query]);
+
+  const personBalances = useMemo(() => {
+    if (!allow.includes('person')) return new Map<string, number>();
+    const map = new Map<string, number>();
+    for (const tx of transactions) {
+      if (tx.target_person_id) {
+        map.set(
+          tx.target_person_id,
+          (map.get(tx.target_person_id) ?? 0) + (Number(tx.target_amount) || 0)
+        );
+      }
+      if (tx.source_person_id) {
+        map.set(
+          tx.source_person_id,
+          (map.get(tx.source_person_id) ?? 0) - (Number(tx.source_amount) || 0)
+        );
+      }
+    }
+    return map;
+  }, [transactions, allow]);
+
+  const filteredPersons = useMemo(() => {
+    if (!allow.includes('person')) return [];
+    const q = query.trim().toLowerCase();
+    return persons
+      .filter((person) => !exclude.has(person.id))
+      .filter((person) =>
+        q === '' ? true : person.name.toLowerCase().includes(q)
+      );
+  }, [persons, allow, exclude, query]);
 
   const handleSelect = (kind: EndpointKind, id: string) => {
     onSelect(kind, id);
@@ -188,6 +222,44 @@ export function EndpointSheetPicker({
                       {holding > 0
                         ? holding.toLocaleString('en-US', { maximumFractionDigits: 6 })
                         : '—'}
+                    </span>
+                  }
+                />
+              );
+            })}
+          </Section>
+        )}
+
+        {allow.includes('person') && (
+          <Section
+            label="اشخاص"
+            empty={filteredPersons.length === 0 ? 'شخصی یافت نشد.' : null}
+          >
+            {filteredPersons.map((person) => {
+              const balance = personBalances.get(person.id) ?? 0;
+              const status =
+                balance > 0 ? 'بدهکار' : balance < 0 ? 'بستانکار' : 'تسویه';
+              const tone =
+                balance > 0
+                  ? 'text-amber-300'
+                  : balance < 0
+                    ? 'text-cyan-300'
+                    : 'text-slate-500';
+              return (
+                <PickerRow
+                  key={person.id}
+                  onClick={() => handleSelect('person', person.id)}
+                  iconUrl={null}
+                  fallback={<UserRound size={18} />}
+                  iconBg="rgba(56, 189, 248, 0.12)"
+                  iconColor="#7dd3fc"
+                  title={person.name}
+                  subtitle={`وضعیت: ${status}`}
+                  right={
+                    <span className={`text-xs ${tone}`} dir="ltr">
+                      {Math.abs(balance).toLocaleString('en-US', {
+                        maximumFractionDigits: 6,
+                      })}
                     </span>
                   }
                 />

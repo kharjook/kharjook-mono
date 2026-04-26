@@ -17,7 +17,10 @@ export interface ShellProps {
 export function Shell({ children, modal }: ShellProps) {
   const { currencyMode, toggleCurrency } = useUI();
   const pathname = usePathname();
-  const showNav = TAB_ROUTES.has(pathname) || pathname === '/deadlines/loans';
+  const showNav =
+    TAB_ROUTES.has(pathname) ||
+    pathname === '/deadlines/loans' ||
+    pathname === '/deadlines/persons';
 
   return (
     <div className="bg-[#0F1015] text-slate-200 min-h-dvh font-sans flex justify-center selection:bg-purple-500/30">

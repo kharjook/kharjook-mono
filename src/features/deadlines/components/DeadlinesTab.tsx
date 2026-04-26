@@ -27,11 +27,11 @@ const DEADLINE_ITEMS: DeadlineItem[] = [
     href: '/deadlines/loans',
   },
   {
-    key: 'debts',
-    title: 'طلب و بدهی',
-    subtitle: 'به‌زودی',
+    key: 'persons',
+    title: 'اشخاص',
+    subtitle: 'مدیریت طلب و بدهی اشخاص',
     icon: <HandCoins size={20} />,
-    disabled: true,
+    href: '/deadlines/persons',
   },
   {
     key: 'checks',

@@ -29,6 +29,7 @@ import type {
   CurrencyMode,
   CurrencyRate,
   DailyPrice,
+  Person,
   Transaction,
   Wallet,
 } from '@/shared/types/domain';
@@ -45,6 +46,7 @@ interface DataValue {
   transactions: Transaction[];
   wallets: Wallet[];
   currencyRates: CurrencyRate[];
+  persons: Person[];
   /**
    * End-of-day snapshots used by the reports feature to compute unrealized
    * P/L at a past period's end. See `DailyPrice` for the write-priority rules.
@@ -56,6 +58,7 @@ interface DataValue {
   setTransactions: Dispatch<SetStateAction<Transaction[]>>;
   setWallets: Dispatch<SetStateAction<Wallet[]>>;
   setCurrencyRates: Dispatch<SetStateAction<CurrencyRate[]>>;
+  setPersons: Dispatch<SetStateAction<Person[]>>;
   setDailyPrices: Dispatch<SetStateAction<DailyPrice[]>>;
   refresh: () => Promise<void>;
   refreshAll: () => Promise<void>;
@@ -98,6 +101,7 @@ export function PortfolioProvider({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [currencyRates, setCurrencyRates] = useState<CurrencyRate[]>([]);
+  const [persons, setPersons] = useState<Person[]>([]);
   const [dailyPrices, setDailyPrices] = useState<DailyPrice[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
 
@@ -111,7 +115,7 @@ export function PortfolioProvider({
     const seq = ++fetchSeq.current;
     setIsLoadingData(true);
     try {
-      const [catRes, astRes, txRes, walRes, rateRes, dpRes] = await Promise.all([
+      const [catRes, astRes, txRes, walRes, rateRes, perRes, dpRes] = await Promise.all([
         supabase
           .from('categories')
           .select('*')
@@ -131,6 +135,10 @@ export function PortfolioProvider({
           .order('created_at', { ascending: true }),
         supabase.from('currency_rates').select('*'),
         supabase
+          .from('persons')
+          .select('*')
+          .order('created_at', { ascending: true }),
+        supabase
           .from('daily_prices')
           .select('*')
           .order('date_string', { ascending: false }),
@@ -143,6 +151,7 @@ export function PortfolioProvider({
       if (txRes.error) throw txRes.error;
       if (walRes.error) throw walRes.error;
       if (rateRes.error) throw rateRes.error;
+      if (perRes.error) throw perRes.error;
       if (dpRes.error) throw dpRes.error;
 
       let nextCategories = (catRes.data as Category[]) || [];
@@ -150,6 +159,7 @@ export function PortfolioProvider({
       let nextTransactions = (txRes.data as Transaction[]) || [];
       let nextWallets = (walRes.data as Wallet[]) || [];
       let nextCurrencyRates = (rateRes.data as CurrencyRate[]) || [];
+      let nextPersons = (perRes.data as Person[]) || [];
       let nextDailyPrices = (dpRes.data as DailyPrice[]) || [];
 
       if (includeExternal) {
@@ -207,6 +217,7 @@ export function PortfolioProvider({
       setTransactions(nextTransactions);
       setWallets(nextWallets);
       setCurrencyRates(nextCurrencyRates);
+      setPersons(nextPersons);
       setDailyPrices(nextDailyPrices);
     } catch (error) {
       if (seq !== fetchSeq.current) return;
@@ -245,6 +256,7 @@ export function PortfolioProvider({
       setTransactions([]);
       setWallets([]);
       setCurrencyRates([]);
+      setPersons([]);
       setDailyPrices([]);
     }
   }, [user, refresh]);
@@ -271,6 +283,7 @@ export function PortfolioProvider({
       transactions,
       wallets,
       currencyRates,
+      persons,
       dailyPrices,
       isLoadingData,
       setCategories,
@@ -278,6 +291,7 @@ export function PortfolioProvider({
       setTransactions,
       setWallets,
       setCurrencyRates,
+      setPersons,
       setDailyPrices,
       refresh,
       refreshAll,
@@ -288,6 +302,7 @@ export function PortfolioProvider({
       transactions,
       wallets,
       currencyRates,
+      persons,
       dailyPrices,
       isLoadingData,
       refresh,
