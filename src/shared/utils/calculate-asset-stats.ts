@@ -7,12 +7,26 @@ export function calculateAssetStats(
   _currencyMode: CurrencyMode,
   usdRate: number
 ): AssetStats {
-  // Asset-side INCOME/EXPENSE also carry `asset_id` (see `buildPayload`),
-  // so this single predicate captures all four tx shapes that move the
-  // asset's book: BUY/SELL + asset-side INCOME/EXPENSE. INCOME is treated
-  // as an acquisition at `price_toman` (market at receipt). EXPENSE is a
-  // disposal identical to SELL for cost-basis / realized-P&L purposes.
-  const assetTxs = transactions.filter((tx) => tx.asset_id === asset.id);
+  const isAcquireType = (tx: Transaction) =>
+    (tx.type === 'BUY' || tx.type === 'INCOME') &&
+    (tx.asset_id === asset.id || tx.target_asset_id === asset.id);
+  const isDisposeType = (tx: Transaction) =>
+    (tx.type === 'SELL' || tx.type === 'EXPENSE') &&
+    (tx.asset_id === asset.id || tx.source_asset_id === asset.id);
+  const isTransferAcquire = (tx: Transaction) =>
+    tx.type === 'TRANSFER' && tx.target_asset_id === asset.id;
+  const isTransferDispose = (tx: Transaction) =>
+    tx.type === 'TRANSFER' && tx.source_asset_id === asset.id;
+
+  // Include transfer rows where the asset is one side. Payload writes
+  // legacy trio (`asset_id/amount/price_toman`) for these rows.
+  const assetTxs = transactions.filter(
+    (tx) =>
+      isAcquireType(tx) ||
+      isDisposeType(tx) ||
+      isTransferAcquire(tx) ||
+      isTransferDispose(tx)
+  );
 
   let totalAmount = 0;
   let totalCostToman = 0;
@@ -20,9 +34,6 @@ export function calculateAssetStats(
   let realizedProfitToman = 0;
   let realizedProfitUsd = 0;
   let historicalCostToman = 0; // Used for accurate ROI percentage
-
-  const isAcquireType = (t: Transaction['type']) => t === 'BUY' || t === 'INCOME';
-  const isDisposeType = (t: Transaction['type']) => t === 'SELL' || t === 'EXPENSE';
 
   // Bulletproof sort: Oldest to Newest, handling same-day trades logically
   const sortedTxs = [...assetTxs].sort((a, b) => {
@@ -33,8 +44,8 @@ export function calculateAssetStats(
 
     // If exact same date, process acquisitions before disposals to avoid
     // phantom zero balances.
-    const ra = isAcquireType(a.type) ? 0 : 1;
-    const rb = isAcquireType(b.type) ? 0 : 1;
+    const ra = isAcquireType(a) || isTransferAcquire(a) ? 0 : 1;
+    const rb = isAcquireType(b) || isTransferAcquire(b) ? 0 : 1;
     if (ra !== rb) return ra - rb;
 
     // Final fallback to real creation timestamp
@@ -42,7 +53,9 @@ export function calculateAssetStats(
   });
 
   sortedTxs.forEach((tx) => {
-    if (!isAcquireType(tx.type) && !isDisposeType(tx.type)) return;
+    const isAcquire = isAcquireType(tx) || isTransferAcquire(tx);
+    const isDispose = isDisposeType(tx) || isTransferDispose(tx);
+    if (!isAcquire && !isDispose) return;
 
     const amount = Number(tx.amount);
     const priceToman = Number(tx.price_toman);
@@ -51,7 +64,7 @@ export function calculateAssetStats(
     const txUsdRate = Number(tx.usd_rate) || usdRate;
     const priceUsd = priceToman / txUsdRate;
 
-    if (isAcquireType(tx.type)) {
+    if (isAcquire) {
       totalAmount += amount;
       const txCostToman = amount * priceToman;
       totalCostToman += txCostToman;

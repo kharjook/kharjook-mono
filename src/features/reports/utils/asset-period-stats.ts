@@ -129,7 +129,7 @@ function finalizeSide(s: SideAggregate): void {
 /**
  * Normalize the cost-basis / proceeds side of any asset-touching tx into
  * unified `(amount, priceToman, priceUsd)`. Handles:
- *   - BUY / SELL (legacy + polymorphic columns)
+ *   - BUY / SELL / TRANSFER (legacy + polymorphic columns)
  *   - Asset-side INCOME (target_asset_id populated)
  *   - Asset-side EXPENSE (source_asset_id populated)
  *
@@ -152,8 +152,7 @@ function readTrade(
   let priceToman = Number(tx.price_toman);
   if (!Number.isFinite(priceToman) || priceToman <= 0) {
     // Only BUY/SELL can derive priceToman from the counterparty wallet
-    // amount — INCOME/EXPENSE have no wallet counterparty on the asset
-    // side, so they MUST carry `price_toman`.
+    // amount. TRANSFER/INCOME/EXPENSE must carry `price_toman`.
     if (tx.type === 'BUY' || tx.type === 'SELL') {
       const money = Number(tx.type === 'BUY' ? tx.source_amount : tx.target_amount);
       if (Number.isFinite(money) && money > 0 && Number.isFinite(amount) && amount > 0) {
@@ -180,6 +179,9 @@ function isAcquireForAsset(tx: Transaction, assetId: string): boolean {
   if (tx.type === 'INCOME') {
     return tx.target_asset_id === assetId || tx.asset_id === assetId;
   }
+  if (tx.type === 'TRANSFER') {
+    return tx.target_asset_id === assetId;
+  }
   return false;
 }
 
@@ -189,6 +191,9 @@ function isDisposeForAsset(tx: Transaction, assetId: string): boolean {
   }
   if (tx.type === 'EXPENSE') {
     return tx.source_asset_id === assetId || tx.asset_id === assetId;
+  }
+  if (tx.type === 'TRANSFER') {
+    return tx.source_asset_id === assetId;
   }
   return false;
 }

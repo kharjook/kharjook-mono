@@ -717,7 +717,9 @@ function computeAmountSnapshots(
 function buildPayload(
   form: FormState,
   userId: string,
-  wallets: Wallet[]
+  wallets: Wallet[],
+  currencyRates: CurrencyRate[],
+  fallbackUsdRate: number
 ): Record<string, unknown> {
   // Polymorphic columns default to NULL — the per-type switch below fills
   // only the fields that apply. Legacy `asset_id` / `amount` / `price_toman`
@@ -781,6 +783,39 @@ function buildPayload(
     case 'TRANSFER':
       setSource();
       setTarget();
+      // Asset<->wallet transfer should update asset holdings/cost replay exactly
+      // like a sell/buy at the implied unit price.
+      if (form.sourceKind === 'asset' && form.targetKind === 'wallet') {
+        const qty = Number(form.sourceAmount);
+        const money = Number(form.targetAmount);
+        const targetWallet = wallets.find((w) => w.id === form.targetId);
+        const walletRate = targetWallet
+          ? walletRateForTransfer(targetWallet, currencyRates, fallbackUsdRate)
+          : 0;
+        const toman = Number.isFinite(money) && Number.isFinite(walletRate) ? money * walletRate : 0;
+        if (qty > 0 && toman > 0) {
+          base.asset_id = form.sourceId;
+          base.amount = qty;
+          base.price_toman = toman / qty;
+          const u = Number(form.usdRate);
+          if (u > 0) base.usd_rate = u;
+        }
+      } else if (form.sourceKind === 'wallet' && form.targetKind === 'asset') {
+        const qty = Number(form.targetAmount);
+        const money = Number(form.sourceAmount);
+        const sourceWallet = wallets.find((w) => w.id === form.sourceId);
+        const walletRate = sourceWallet
+          ? walletRateForTransfer(sourceWallet, currencyRates, fallbackUsdRate)
+          : 0;
+        const toman = Number.isFinite(money) && Number.isFinite(walletRate) ? money * walletRate : 0;
+        if (qty > 0 && toman > 0) {
+          base.asset_id = form.targetId;
+          base.amount = qty;
+          base.price_toman = toman / qty;
+          const u = Number(form.usdRate);
+          if (u > 0) base.usd_rate = u;
+        }
+      }
       break;
     case 'INCOME':
       setTarget();
@@ -817,7 +852,8 @@ function buildPayload(
 }
 
 /**
- * Build daily_prices rows from freshly-saved BUY/SELL transactions.
+ * Build daily_prices rows from freshly-saved BUY/SELL (+asset-side TRANSFER)
+ * transactions.
  *
  * Writes with `ignoreDuplicates: true` so ANY existing snapshot on that
  * (user, asset, date_string) key survives untouched — critical for the
@@ -825,7 +861,7 @@ function buildPayload(
  * the same day, first-writer-wins is good enough; manual save will
  * overwrite regardless.
  *
- * Only trades with a positive `price_toman` AND positive `usd_rate` are
+ * Only rows with a positive `price_toman` AND positive `usd_rate` are
  * snapshotted. Without a rate we cannot materialize a true usd price, and
  * a zero would contaminate P/L lookups.
  */
@@ -835,9 +871,14 @@ function buildTradeSnapshots(
 ): Omit<DailyPrice, 'created_at' | 'updated_at'>[] {
   const out: Omit<DailyPrice, 'created_at' | 'updated_at'>[] = [];
   for (const tx of txs) {
-    if (tx.type !== 'BUY' && tx.type !== 'SELL') continue;
+    if (tx.type !== 'BUY' && tx.type !== 'SELL' && tx.type !== 'TRANSFER') continue;
     const assetId =
-      tx.asset_id ?? (tx.type === 'BUY' ? tx.target_asset_id : tx.source_asset_id);
+      tx.asset_id ??
+      (tx.type === 'BUY'
+        ? tx.target_asset_id
+        : tx.type === 'SELL'
+          ? tx.source_asset_id
+          : tx.source_asset_id ?? tx.target_asset_id);
     if (!assetId) continue;
     if (!tx.date_string) continue;
     if (!/^[0-9]{4}\/[0-9]{2}\/[0-9]{2}$/.test(tx.date_string)) continue;
@@ -1027,7 +1068,13 @@ export function AddTransactionView({
     setIsSubmitting(true);
     try {
       if (isEdit && txToEdit) {
-        const payload = buildPayload(rows[0], user.id, wallets);
+        const payload = buildPayload(
+          rows[0],
+          user.id,
+          wallets,
+          currencyRates,
+          usdRate
+        );
         const { data, error } = await supabase
           .from('transactions')
           .update(payload)
@@ -1044,7 +1091,9 @@ export function AddTransactionView({
         toast.success('تراکنش به‌روزرسانی شد.');
         router.back();
       } else {
-        const payloads = rows.map((r) => buildPayload(r, user.id, wallets));
+        const payloads = rows.map((r) =>
+          buildPayload(r, user.id, wallets, currencyRates, usdRate)
+        );
         const { data, error } = await supabase
           .from('transactions')
           .insert(payloads)
