@@ -8,10 +8,27 @@ import {
   ChevronLeft,
   Edit3,
   Folder,
+  GripVertical,
   Link2,
   Trash2,
   X,
 } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Asset } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -47,7 +64,6 @@ export function ManageAssetsView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [priceSourcePickerOpen, setPriceSourcePickerOpen] = useState(false);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const selectedCategory = useMemo(
     () =>
@@ -91,6 +107,10 @@ export function ManageAssetsView() {
       : null;
 
   if (!user) return null;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } })
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,15 +164,8 @@ export function ManageAssetsView() {
     }
   };
 
-  const reorderAssets = async (fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    const fromIndex = assets.findIndex((a) => a.id === fromId);
-    const toIndex = assets.findIndex((a) => a.id === toId);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const next = assets.slice();
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    const normalized = next.map((a, i) => ({ ...a, order_index: i }));
+  const persistAssetOrder = async (ordered: Asset[]) => {
+    const normalized = ordered.map((a, i) => ({ ...a, order_index: i }));
     setAssets(normalized);
     const results = await Promise.all(
       normalized.map((a) =>
@@ -170,6 +183,15 @@ export function ManageAssetsView() {
         .order('created_at', { ascending: true });
       if (data) setAssets(data as Asset[]);
     }
+  };
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIndex = assets.findIndex((a) => a.id === active.id);
+    const toIndex = assets.findIndex((a) => a.id === over.id);
+    if (fromIndex < 0 || toIndex < 0) return;
+    void persistAssetOrder(arrayMove(assets, fromIndex, toIndex));
   };
 
   const handleEdit = (asset: Asset) => {
@@ -408,73 +430,28 @@ export function ManageAssetsView() {
         <h3 className="text-sm font-semibold text-slate-400 mb-4">
           دارایی‌های تعریف شده
         </h3>
-        {assets.map((asset) => {
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={assets.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+            {assets.map((asset) => {
           const cat = categories.find((c) => c.id === asset.category_id);
           const color = cat ? cat.color : '#64748b';
           const source = findPriceSource(asset.price_source_id);
 
           return (
-            <div
+            <SortableAssetRow
               key={asset.id}
-              draggable
-              onDragStart={() => setDraggingId(asset.id)}
-              onDragEnd={() => setDraggingId(null)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => {
-                if (draggingId) void reorderAssets(draggingId, asset.id);
-                setDraggingId(null);
-              }}
-              className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editingId === asset.id ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'}`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <EntityIcon
-                  iconUrl={asset.icon_url}
-                  fallback={<Activity size={18} />}
-                  bgColor={`${color}20`}
-                  color={color}
-                  className="w-10 h-10 shrink-0"
-                />
-                <div className="min-w-0">
-                  <p className="text-slate-200 font-medium text-sm truncate">
-                    {asset.name}
-                  </p>
-                  <p className="text-slate-500 text-xs mt-1 truncate">
-                    {cat ? cat.name : 'بدون دسته'} • {asset.unit}
-                  </p>
-                  {asset.include_in_balance === false && (
-                    <span className="inline-block mt-1.5 text-[10px] text-sky-300/90 bg-sky-500/10 border border-sky-500/20 rounded-full px-2 py-0.5">
-                      خارج از ارزش کل سبد
-                    </span>
-                  )}
-                  {asset.include_in_profit_loss === false && (
-                    <span className="inline-block mt-1.5 text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
-                      خارج از سود/زیان
-                    </span>
-                  )}
-                  {source && (
-                    <span className="inline-block mt-1.5 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/20 rounded-full px-2 py-0.5">
-                      {source.label}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => handleEdit(asset)}
-                  className="text-blue-400/60 hover:text-blue-400 p-1.5 bg-blue-500/10 rounded-lg transition-colors"
-                >
-                  <Edit3 size={14} />
-                </button>
-                <button
-                  onClick={() => handleDelete(asset.id)}
-                  className="text-rose-400/60 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
+              asset={asset}
+              editing={editingId === asset.id}
+              catName={cat ? cat.name : 'بدون دسته'}
+              color={color}
+              sourceLabel={source?.label ?? null}
+              onEdit={() => handleEdit(asset)}
+              onDelete={() => handleDelete(asset.id)}
+            />
           );
-        })}
+            })}
+          </SortableContext>
+        </DndContext>
         {assets.length === 0 && (
           <p className="text-center text-slate-500 text-sm">
             هیچ دارایی ثبت نشده.
@@ -510,6 +487,81 @@ export function ManageAssetsView() {
         noneLeading={<Link2 size={14} />}
         emptyLabel="منبع قیمتی پیکربندی نشده."
       />
+    </div>
+  );
+}
+
+function SortableAssetRow({
+  asset,
+  editing,
+  catName,
+  color,
+  sourceLabel,
+  onEdit,
+  onDelete,
+}: {
+  asset: Asset;
+  editing: boolean;
+  catName: string;
+  color: string;
+  sourceLabel: string | null;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: asset.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'} ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''}`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
+          aria-label="جابجایی"
+        >
+          <GripVertical size={16} />
+        </button>
+        <EntityIcon
+          iconUrl={asset.icon_url}
+          fallback={<Activity size={18} />}
+          bgColor={`${color}20`}
+          color={color}
+          className="w-10 h-10 shrink-0"
+        />
+        <div className="min-w-0">
+          <p className="text-slate-200 font-medium text-sm truncate">{asset.name}</p>
+          <p className="text-slate-500 text-xs mt-1 truncate">
+            {catName} • {asset.unit}
+          </p>
+          {asset.include_in_balance === false && (
+            <span className="inline-block mt-1.5 text-[10px] text-sky-300/90 bg-sky-500/10 border border-sky-500/20 rounded-full px-2 py-0.5">
+              خارج از ارزش کل سبد
+            </span>
+          )}
+          {asset.include_in_profit_loss === false && (
+            <span className="inline-block mt-1.5 text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+              خارج از سود/زیان
+            </span>
+          )}
+          {sourceLabel && (
+            <span className="inline-block mt-1.5 text-[10px] text-purple-300/80 bg-purple-500/10 border border-purple-500/20 rounded-full px-2 py-0.5">
+              {sourceLabel}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <button onClick={onEdit} className="text-blue-400/60 hover:text-blue-400 p-1.5 bg-blue-500/10 rounded-lg transition-colors">
+          <Edit3 size={14} />
+        </button>
+        <button onClick={onDelete} className="text-rose-400/60 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-colors">
+          <Trash2 size={14} />
+        </button>
+      </div>
     </div>
   );
 }

@@ -8,9 +8,26 @@ import {
   ChevronLeft,
   Edit3,
   Folder,
+  GripVertical,
   Trash2,
   X,
 } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
 import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
 import { useToast } from '@/shared/components/Toast';
@@ -54,7 +71,6 @@ export function ManageCategoriesView() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   // Categories scoped to the current tab.
   const scoped = useMemo(
@@ -120,6 +136,10 @@ export function ManageCategoriesView() {
   );
 
   if (!user) return null;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } })
+  );
 
   const switchTab = (kind: CategoryKind) => {
     if (kind === activeKind) return;
@@ -222,19 +242,17 @@ export function ManageCategoriesView() {
     }
   };
 
-  const reorderCategorySiblings = async (fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    const from = scoped.find((c) => c.id === fromId);
-    const to = scoped.find((c) => c.id === toId);
+  const reorderCategorySiblings = async (activeId: string, overId: string) => {
+    if (activeId === overId) return;
+    const from = scoped.find((c) => c.id === activeId);
+    const to = scoped.find((c) => c.id === overId);
     if (!from || !to) return;
     if ((from.parent_id ?? null) !== (to.parent_id ?? null)) return;
     const siblings = scoped.filter((c) => (c.parent_id ?? null) === (from.parent_id ?? null));
-    const fromIndex = siblings.findIndex((c) => c.id === fromId);
-    const toIndex = siblings.findIndex((c) => c.id === toId);
+    const fromIndex = siblings.findIndex((c) => c.id === activeId);
+    const toIndex = siblings.findIndex((c) => c.id === overId);
     if (fromIndex < 0 || toIndex < 0) return;
-    const nextSiblings = siblings.slice();
-    const [moved] = nextSiblings.splice(fromIndex, 1);
-    nextSiblings.splice(toIndex, 0, moved);
+    const nextSiblings = arrayMove(siblings, fromIndex, toIndex);
     const withOrder = new Map<string, number>();
     nextSiblings.forEach((c, idx) => withOrder.set(c.id, idx));
     const nextCategories = categories.map((c) =>
@@ -257,6 +275,11 @@ export function ManageCategoriesView() {
         .order('created_at', { ascending: true });
       if (data) setCategories(data as Category[]);
     }
+  };
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    void reorderCategorySiblings(String(active.id), String(over.id));
   };
 
   const namePlaceholder =
@@ -407,19 +430,20 @@ export function ManageCategoriesView() {
             هیچ دسته‌بندی ثبت نشده.
           </p>
         )}
-        {roots.map((root) => (
-          <CategoryNode
-            key={root.id}
-            category={root}
-            depth={0}
-            childrenByParent={childrenByParent}
-            onDragStart={setDraggingId}
-            draggingId={draggingId}
-            onDropOnCategory={reorderCategorySiblings}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-          />
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={roots.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+            {roots.map((root) => (
+              <CategoryNode
+                key={root.id}
+                category={root}
+                depth={0}
+                childrenByParent={childrenByParent}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
 
       {activeKind !== 'asset' && (
@@ -444,9 +468,6 @@ interface CategoryNodeProps {
   category: Category;
   depth: number;
   childrenByParent: Map<string, Category[]>;
-  onDragStart: (id: string | null) => void;
-  draggingId: string | null;
-  onDropOnCategory: (fromId: string, toId: string) => Promise<void>;
   onEdit: (c: Category) => void;
   onDelete: (c: Category) => void;
 }
@@ -455,28 +476,29 @@ function CategoryNode({
   category,
   depth,
   childrenByParent,
-  onDragStart,
-  draggingId,
-  onDropOnCategory,
   onEdit,
   onDelete,
 }: CategoryNodeProps) {
   const kids = childrenByParent.get(category.id) ?? [];
   const compact = depth > 0;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: category.id });
   return (
     <div className="space-y-2">
       <div
-        draggable
-        onDragStart={() => onDragStart(category.id)}
-        onDragEnd={() => onDragStart(null)}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={() => {
-          if (draggingId) void onDropOnCategory(draggingId, category.id);
-          onDragStart(null);
-        }}
-        className={`bg-[#1A1B26] ${compact ? 'p-3' : 'p-4'} rounded-xl border border-white/5 flex items-center justify-between`}
+        ref={setNodeRef}
+        style={{ transform: CSS.Transform.toString(transform), transition }}
+        className={`bg-[#1A1B26] ${compact ? 'p-3' : 'p-4'} rounded-xl border border-white/5 flex items-center justify-between ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''}`}
       >
         <div className="flex items-center gap-3 min-w-0">
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
+            aria-label="جابجایی"
+          >
+            <GripVertical size={compact ? 13 : 15} />
+          </button>
           <div
             className={`${compact ? 'w-3 h-3' : 'w-4 h-4'} rounded-full shrink-0`}
             style={{ backgroundColor: category.color }}
@@ -506,19 +528,18 @@ function CategoryNode({
       </div>
       {kids.length > 0 && (
         <div className="pr-6 space-y-2 border-r border-white/5 mr-3">
-          {kids.map((kid) => (
-            <CategoryNode
-              key={kid.id}
-              category={kid}
-              depth={depth + 1}
-              childrenByParent={childrenByParent}
-              onDragStart={onDragStart}
-              draggingId={draggingId}
-              onDropOnCategory={onDropOnCategory}
-              onEdit={onEdit}
-              onDelete={onDelete}
-            />
-          ))}
+          <SortableContext items={kids.map((k) => k.id)} strategy={verticalListSortingStrategy}>
+            {kids.map((kid) => (
+              <CategoryNode
+                key={kid.id}
+                category={kid}
+                depth={depth + 1}
+                childrenByParent={childrenByParent}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </SortableContext>
         </div>
       )}
     </div>

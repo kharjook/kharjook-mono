@@ -2,7 +2,23 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Archive, ArrowRight, Edit3, Wallet as WalletIcon, X } from 'lucide-react';
+import { Archive, ArrowRight, Edit3, GripVertical, Wallet as WalletIcon, X } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { IconPicker } from '@/shared/components/IconPicker';
@@ -40,9 +56,12 @@ export function ManageWalletsView() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   if (!user) return null;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } })
+  );
 
   const resetForm = () => setForm(emptyForm);
 
@@ -109,15 +128,8 @@ export function ManageWalletsView() {
     }
   };
 
-  const reorderWallets = async (fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    const fromIndex = wallets.findIndex((w) => w.id === fromId);
-    const toIndex = wallets.findIndex((w) => w.id === toId);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const next = wallets.slice();
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    const normalized = next.map((w, i) => ({ ...w, order_index: i }));
+  const persistWalletOrder = async (ordered: Wallet[]) => {
+    const normalized = ordered.map((w, i) => ({ ...w, order_index: i }));
     setWallets(normalized);
     const updates = normalized.map((w) =>
       supabase.from('wallets').update({ order_index: w.order_index }).eq('id', w.id)
@@ -135,6 +147,15 @@ export function ManageWalletsView() {
         .order('created_at', { ascending: true });
       if (data) setWallets(data as Wallet[]);
     }
+  };
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIndex = wallets.findIndex((w) => w.id === active.id);
+    const toIndex = wallets.findIndex((w) => w.id === over.id);
+    if (fromIndex < 0 || toIndex < 0) return;
+    void persistWalletOrder(arrayMove(wallets, fromIndex, toIndex));
   };
 
   const handleArchive = async (w: Wallet) => {
@@ -285,67 +306,100 @@ export function ManageWalletsView() {
       </form>
 
       <div className="px-6 pt-6 space-y-3">
-        {wallets.map((w) => {
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={wallets.map((w) => w.id)} strategy={verticalListSortingStrategy}>
+            {wallets.map((w) => {
           const meta = CURRENCY_META[w.currency];
           return (
-            <div
+            <SortableWalletRow
               key={w.id}
-              draggable
-              onDragStart={() => setDraggingId(w.id)}
-              onDragEnd={() => setDraggingId(null)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => {
-                if (draggingId) void reorderWallets(draggingId, w.id);
-                setDraggingId(null);
-              }}
-              className="bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <EntityIcon
-                  iconUrl={w.icon_url}
-                  fallback={<WalletIcon size={18} />}
-                  bgColor="rgba(168, 85, 247, 0.10)"
-                  color="#c084fc"
-                  className="w-10 h-10 shrink-0"
-                />
-                <div className="min-w-0">
-                  <p className="text-slate-200 text-sm font-medium truncate">
-                    {w.name}
-                  </p>
-                  <p
-                    className="text-slate-500 text-xs mt-0.5 "
-                    dir="ltr"
-                  >
-                    {meta.symbol} {Number(w.initial_balance).toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}{' '}
-                    · {w.currency}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => handleEdit(w)}
-                  className="text-blue-400/50 hover:text-blue-400 p-1.5 transition-colors"
-                  aria-label="ویرایش"
-                >
-                  <Edit3 size={16} />
-                </button>
-                <button
-                  onClick={() => handleArchive(w)}
-                  disabled={archivingId === w.id}
-                  className="text-amber-400/50 hover:text-amber-400 p-1.5 transition-colors disabled:opacity-30"
-                  aria-label="بایگانی"
-                >
-                  <Archive size={16} />
-                </button>
-              </div>
-            </div>
+              wallet={w}
+              metaLabel={meta}
+              onEdit={() => handleEdit(w)}
+              onArchive={() => handleArchive(w)}
+              archiving={archivingId === w.id}
+            />
           );
-        })}
+            })}
+          </SortableContext>
+        </DndContext>
         {wallets.length === 0 && (
           <p className="text-center text-slate-500 text-sm py-6">
             هنوز کیف پولی نساخته‌ای.
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SortableWalletRow({
+  wallet,
+  metaLabel,
+  onEdit,
+  onArchive,
+  archiving,
+}: {
+  wallet: Wallet;
+  metaLabel: { symbol: string; decimals: number };
+  onEdit: () => void;
+  onArchive: () => void;
+  archiving: boolean;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: wallet.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex items-center justify-between ${isDragging ? 'opacity-70 shadow-lg ring-1 ring-purple-400/30' : ''}`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
+          aria-label="جابجایی"
+        >
+          <GripVertical size={16} />
+        </button>
+        <EntityIcon
+          iconUrl={wallet.icon_url}
+          fallback={<WalletIcon size={18} />}
+          bgColor="rgba(168, 85, 247, 0.10)"
+          color="#c084fc"
+          className="w-10 h-10 shrink-0"
+        />
+        <div className="min-w-0">
+          <p className="text-slate-200 text-sm font-medium truncate">{wallet.name}</p>
+          <p className="text-slate-500 text-xs mt-0.5" dir="ltr">
+            {metaLabel.symbol} {Number(wallet.initial_balance).toLocaleString('en-US', { maximumFractionDigits: metaLabel.decimals })} · {wallet.currency}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          onClick={onEdit}
+          className="text-blue-400/50 hover:text-blue-400 p-1.5 transition-colors"
+          aria-label="ویرایش"
+        >
+          <Edit3 size={16} />
+        </button>
+        <button
+          onClick={onArchive}
+          disabled={archiving}
+          className="text-amber-400/50 hover:text-amber-400 p-1.5 transition-colors disabled:opacity-30"
+          aria-label="بایگانی"
+        >
+          <Archive size={16} />
+        </button>
       </div>
     </div>
   );

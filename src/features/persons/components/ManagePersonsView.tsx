@@ -2,7 +2,23 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Edit3, Plus, Trash2, UserRound, X } from 'lucide-react';
+import { ArrowRight, Edit3, GripVertical, Plus, Trash2, UserRound, X } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { useToast } from '@/shared/components/Toast';
@@ -18,7 +34,6 @@ export function ManagePersonsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const balances = useMemo(() => {
     const map = new Map<string, number>();
@@ -29,6 +44,10 @@ export function ManagePersonsView() {
   }, [persons, transactions]);
 
   if (!user) return null;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 8 } })
+  );
 
   const reset = () => {
     setEditingId(null);
@@ -80,15 +99,8 @@ export function ManagePersonsView() {
     }
   };
 
-  const reorderPersons = async (fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    const fromIndex = persons.findIndex((p) => p.id === fromId);
-    const toIndex = persons.findIndex((p) => p.id === toId);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const next = persons.slice();
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    const normalized = next.map((p, i) => ({ ...p, order_index: i }));
+  const persistOrder = async (ordered: Person[]) => {
+    const normalized = ordered.map((p, i) => ({ ...p, order_index: i }));
     setPersons(normalized);
     const results = await Promise.all(
       normalized.map((p) =>
@@ -106,6 +118,15 @@ export function ManagePersonsView() {
         .order('created_at', { ascending: true });
       if (data) setPersons(data as Person[]);
     }
+  };
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIndex = persons.findIndex((p) => p.id === active.id);
+    const toIndex = persons.findIndex((p) => p.id === over.id);
+    if (fromIndex < 0 || toIndex < 0) return;
+    void persistOrder(arrayMove(persons, fromIndex, toIndex));
   };
 
   const handleEdit = (person: Person) => {
@@ -188,7 +209,9 @@ export function ManagePersonsView() {
 
       <div className="p-6 space-y-3">
         <h3 className="text-sm font-semibold text-slate-400 mb-4">لیست اشخاص</h3>
-        {persons.map((person) => {
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={persons.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+            {persons.map((person) => {
           const balance = balances.get(person.id) ?? 0;
           const status =
             balance > 0 ? 'بدهکار' : balance < 0 ? 'بستانکار' : 'تسویه';
@@ -199,53 +222,79 @@ export function ManagePersonsView() {
                 ? 'text-cyan-300'
                 : 'text-slate-400';
           return (
-            <div
+            <SortablePersonRow
               key={person.id}
-              draggable
-              onDragStart={() => setDraggingId(person.id)}
-              onDragEnd={() => setDraggingId(null)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => {
-                if (draggingId) void reorderPersons(draggingId, person.id);
-                setDraggingId(null);
-              }}
-              className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between ${
-                editingId === person.id ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-300 flex items-center justify-center shrink-0">
-                  <UserRound size={18} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-slate-200 font-medium text-sm truncate">{person.name}</p>
-                  <p className={`text-xs mt-1 ${tone}`} dir="ltr">
-                    {status} · {Math.abs(balance).toLocaleString('en-US', { maximumFractionDigits: 6 })}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleEdit(person)}
-                  className="text-blue-400/60 hover:text-blue-400 p-1.5 bg-blue-500/10 rounded-lg transition-colors"
-                >
-                  <Edit3 size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDelete(person)}
-                  className="text-rose-400/60 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
+              person={person}
+              isEditing={editingId === person.id}
+              status={status}
+              tone={tone}
+              balance={balance}
+              onEdit={() => handleEdit(person)}
+              onDelete={() => void handleDelete(person)}
+            />
           );
-        })}
+            })}
+          </SortableContext>
+        </DndContext>
         {persons.length === 0 && (
           <p className="text-center text-slate-500 text-sm">هنوز شخصی ثبت نشده.</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SortablePersonRow({
+  person,
+  isEditing,
+  status,
+  tone,
+  balance,
+  onEdit,
+  onDelete,
+}: {
+  person: Person;
+  isEditing: boolean;
+  status: string;
+  tone: string;
+  balance: number;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: person.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between ${isEditing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'} ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''}`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
+          aria-label="جابجایی"
+        >
+          <GripVertical size={16} />
+        </button>
+        <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-300 flex items-center justify-center shrink-0">
+          <UserRound size={18} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-slate-200 font-medium text-sm truncate">{person.name}</p>
+          <p className={`text-xs mt-1 ${tone}`} dir="ltr">
+            {status} · {Math.abs(balance).toLocaleString('en-US', { maximumFractionDigits: 6 })}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <button type="button" onClick={onEdit} className="text-blue-400/60 hover:text-blue-400 p-1.5 bg-blue-500/10 rounded-lg transition-colors">
+          <Edit3 size={14} />
+        </button>
+        <button type="button" onClick={onDelete} className="text-rose-400/60 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-colors">
+          <Trash2 size={14} />
+        </button>
       </div>
     </div>
   );
