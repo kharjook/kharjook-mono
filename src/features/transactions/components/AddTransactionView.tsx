@@ -1173,31 +1173,10 @@ export function AddTransactionView({
         setTransactions((prev) => [...inserted.slice().reverse(), ...prev]);
         // Best-effort: snapshot trades in parallel with the success toast.
         await persistTradeSnapshots(inserted);
-        const ids = inserted.map((t) => t.id);
-        // Undo = hard delete + local rollback. 6s window (toast default for info).
         toast.success(
           inserted.length > 1
             ? `${inserted.length} تراکنش ثبت شد.`
             : 'تراکنش ثبت شد.',
-          {
-            action: {
-              label: 'برگرداندن',
-              onClick: async () => {
-                try {
-                  const { error: delErr } = await supabase
-                    .from('transactions')
-                    .delete()
-                    .in('id', ids);
-                  if (delErr) throw delErr;
-                  setTransactions((prev) => prev.filter((t) => !ids.includes(t.id)));
-                  toast.info('تراکنش‌ها لغو شدند.');
-                } catch (undoErr) {
-                  console.error(undoErr);
-                  toast.error('خطا در لغو تراکنش‌ها.');
-                }
-              },
-            },
-          }
         );
         router.back();
       }

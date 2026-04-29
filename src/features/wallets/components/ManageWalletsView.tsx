@@ -24,6 +24,7 @@ import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { IconPicker } from '@/shared/components/IconPicker';
 import { useToast } from '@/shared/components/Toast';
 import { formatCurrencyAmount } from '@/shared/utils/format-currency';
+import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Currency, Wallet } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -57,6 +58,7 @@ export function ManageWalletsView() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [pendingWalletIds, setPendingWalletIds] = useState<Set<string>>(new Set());
 
   if (!user) return null;
   const sensors = useSensors(
@@ -82,48 +84,130 @@ export function ManageWalletsView() {
     const initial = Number(form.initialBalance || '0');
     if (!name || Number.isNaN(initial)) return;
 
-    setIsSubmitting(true);
-    try {
+    const execute = async () => {
       if (form.editingId) {
+        const editingId = form.editingId;
+        const snapshot = wallets;
+        const patch = {
+          name,
+          initial_balance: initial,
+          icon_url: form.iconUrl,
+        };
         // Currency is intentionally immutable post-creation: changing it would
         // silently alter the meaning of every transaction touching this wallet.
-        const { data, error } = await supabase
-          .from('wallets')
-          .update({ name, initial_balance: initial, icon_url: form.iconUrl })
-          .eq('id', form.editingId)
-          .select()
-          .single();
-        if (error) throw error;
-        setWallets((prev) =>
-          prev.map((w) => (w.id === form.editingId ? (data as Wallet) : w))
-        );
+        await runOptimisticMutation({
+          snapshot,
+          applyOptimistic: () => {
+            setPendingWalletIds((prev) => new Set(prev).add(editingId));
+            setWallets((prev) =>
+              prev.map((w) =>
+                w.id === editingId ? { ...w, ...patch } : w
+              )
+            );
+          },
+          rollback: (prev) => {
+            setPendingWalletIds((p) => {
+              const next = new Set(p);
+              next.delete(editingId);
+              return next;
+            });
+            setWallets(prev);
+          },
+          commit: async () => {
+            const { data, error } = await supabase
+              .from('wallets')
+              .update(patch)
+              .eq('id', editingId)
+              .select()
+              .single();
+            if (error) throw error;
+            return data as Wallet;
+          },
+          onSuccess: (saved) => {
+            setPendingWalletIds((p) => {
+              const next = new Set(p);
+              next.delete(editingId);
+              return next;
+            });
+            setWallets((prev) =>
+              prev.map((w) => (w.id === editingId ? saved : w))
+            );
+          },
+        });
       } else {
         const nextOrder =
           wallets.reduce(
             (max, w) => Math.max(max, Number.isFinite(w.order_index) ? Number(w.order_index) : -1),
             -1
           ) + 1;
-        const { data, error } = await supabase
-          .from('wallets')
-          .insert([
-            {
-              user_id: user.id,
-              name,
-              currency: form.currency,
-              initial_balance: initial,
-              icon_url: form.iconUrl,
-              order_index: nextOrder,
-            },
-          ])
-          .select()
-          .single();
-        if (error) throw error;
-        setWallets((prev) => [...prev, data as Wallet]);
+        const snapshot = wallets;
+        const tempId = `temp-wallet-${crypto.randomUUID()}`;
+        const optimisticWallet: Wallet = {
+          id: tempId,
+          user_id: user.id,
+          name,
+          currency: form.currency,
+          initial_balance: initial,
+          icon_url: form.iconUrl,
+          archived_at: null,
+          order_index: nextOrder,
+          created_at: new Date().toISOString(),
+        };
+        await runOptimisticMutation({
+          snapshot,
+          applyOptimistic: () => {
+            setPendingWalletIds((prev) => new Set(prev).add(tempId));
+            setWallets((prev) => [...prev, optimisticWallet]);
+          },
+          rollback: (prev) => {
+            setPendingWalletIds((p) => {
+              const next = new Set(p);
+              next.delete(tempId);
+              return next;
+            });
+            setWallets(prev);
+          },
+          commit: async () => {
+            const { data, error } = await supabase
+              .from('wallets')
+              .insert([
+                {
+                  user_id: user.id,
+                  name,
+                  currency: form.currency,
+                  initial_balance: initial,
+                  icon_url: form.iconUrl,
+                  order_index: nextOrder,
+                },
+              ])
+              .select()
+              .single();
+            if (error) throw error;
+            return data as Wallet;
+          },
+          onSuccess: (saved) => {
+            setPendingWalletIds((p) => {
+              const next = new Set(p);
+              next.delete(tempId);
+              return next;
+            });
+            setWallets((prev) =>
+              prev.map((w) => (w.id === tempId ? saved : w))
+            );
+          },
+        });
       }
       resetForm();
+    };
+
+    setIsSubmitting(true);
+    try {
+      await execute();
     } catch (err) {
       console.error(err);
-      toast.error('خطا در ثبت کیف پول.');
+      toast.error('خطا در ثبت کیف پول.', {
+        action: { label: 'تلاش مجدد', onClick: () => void execute() },
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -170,19 +254,54 @@ export function ManageWalletsView() {
     )
       return;
 
-    setArchivingId(w.id);
-    try {
-      const { error } = await supabase
-        .from('wallets')
-        .update({ archived_at: new Date().toISOString() })
-        .eq('id', w.id);
-      if (error) throw error;
-      setWallets((prev) => prev.filter((x) => x.id !== w.id));
+    const execute = async () => {
+      const snapshot = wallets;
+      setArchivingId(w.id);
+      setPendingWalletIds((prev) => new Set(prev).add(w.id));
+      await runOptimisticMutation({
+        snapshot,
+        applyOptimistic: () => {
+          setWallets((prev) => prev.filter((x) => x.id !== w.id));
+        },
+        rollback: (prev) => {
+          setPendingWalletIds((p) => {
+            const next = new Set(p);
+            next.delete(w.id);
+            return next;
+          });
+          setWallets(prev);
+        },
+        commit: async () => {
+          const { error } = await supabase
+            .from('wallets')
+            .update({ archived_at: new Date().toISOString() })
+            .eq('id', w.id);
+          if (error) throw error;
+        },
+        onSuccess: () => {
+          setPendingWalletIds((p) => {
+            const next = new Set(p);
+            next.delete(w.id);
+            return next;
+          });
+        },
+      });
       if (form.editingId === w.id) resetForm();
+    };
+
+    try {
+      await execute();
     } catch (err) {
       console.error(err);
-      toast.error('خطا در بایگانی.');
+      toast.error('خطا در بایگانی.', {
+        action: { label: 'تلاش مجدد', onClick: () => void execute() },
+      });
     } finally {
+      setPendingWalletIds((p) => {
+        const next = new Set(p);
+        next.delete(w.id);
+        return next;
+      });
       setArchivingId(null);
     }
   };
@@ -322,6 +441,7 @@ export function ManageWalletsView() {
               onEdit={() => handleEdit(w)}
               onArchive={() => handleArchive(w)}
               archiving={archivingId === w.id}
+              pending={pendingWalletIds.has(w.id)}
             />
           );
             })}
@@ -343,12 +463,14 @@ function SortableWalletRow({
   onEdit,
   onArchive,
   archiving,
+  pending,
 }: {
   wallet: Wallet;
   metaLabel: { symbol: string; decimals: number };
   onEdit: () => void;
   onArchive: () => void;
   archiving: boolean;
+  pending: boolean;
 }) {
   const {
     attributes,
@@ -362,7 +484,7 @@ function SortableWalletRow({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex items-center justify-between ${isDragging ? 'opacity-70 shadow-lg ring-1 ring-purple-400/30' : ''}`}
+      className={`bg-[#1A1B26] p-4 rounded-2xl border border-white/5 flex items-center justify-between ${isDragging ? 'opacity-70 shadow-lg ring-1 ring-purple-400/30' : ''} ${pending ? 'opacity-60' : ''}`}
     >
       <div className="flex items-center gap-3 min-w-0">
         <button
@@ -392,6 +514,7 @@ function SortableWalletRow({
       <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={onEdit}
+          disabled={pending}
           className="text-blue-400/50 hover:text-blue-400 p-1.5 transition-colors"
           aria-label="ویرایش"
         >
@@ -399,7 +522,7 @@ function SortableWalletRow({
         </button>
         <button
           onClick={onArchive}
-          disabled={archiving}
+          disabled={archiving || pending}
           className="text-amber-400/50 hover:text-amber-400 p-1.5 transition-colors disabled:opacity-30"
           aria-label="بایگانی"
         >

@@ -40,6 +40,7 @@ import {
   type ListSheetPickerItem,
 } from '@/shared/components/ListSheetPicker';
 import { useToast } from '@/shared/components/Toast';
+import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
 import {
   PRICE_SOURCES,
   findPriceSource,
@@ -65,6 +66,7 @@ export function ManageAssetsView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [priceSourcePickerOpen, setPriceSourcePickerOpen] = useState(false);
+  const [pendingAssetIds, setPendingAssetIds] = useState<Set<string>>(new Set());
 
   const selectedCategory = useMemo(
     () =>
@@ -116,9 +118,7 @@ export function ManageAssetsView() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.unit) return;
-    setIsSubmitting(true);
-
-    try {
+    const execute = async () => {
       const decimalPlaces = Math.max(0, Math.min(12, Math.trunc(Number(formData.decimalPlaces))));
       const payload = {
         category_id: formData.categoryId || null,
@@ -132,14 +132,43 @@ export function ManageAssetsView() {
       };
 
       if (editingId) {
-        const { data, error } = await supabase
-          .from('assets')
-          .update(payload)
-          .eq('id', editingId)
-          .select()
-          .single();
-        if (error) throw error;
-        setAssets((prev) => prev.map((a) => (a.id === editingId ? data : a)));
+        const currentId = editingId;
+        const snapshot = assets;
+        await runOptimisticMutation({
+          snapshot,
+          applyOptimistic: () => {
+            setPendingAssetIds((prev) => new Set(prev).add(currentId));
+            setAssets((prev) =>
+              prev.map((a) => (a.id === currentId ? { ...a, ...payload } : a))
+            );
+          },
+          rollback: (prev) => {
+            setPendingAssetIds((p) => {
+              const next = new Set(p);
+              next.delete(currentId);
+              return next;
+            });
+            setAssets(prev);
+          },
+          commit: async () => {
+            const { data, error } = await supabase
+              .from('assets')
+              .update(payload)
+              .eq('id', currentId)
+              .select()
+              .single();
+            if (error) throw error;
+            return data as Asset;
+          },
+          onSuccess: (saved) => {
+            setPendingAssetIds((p) => {
+              const next = new Set(p);
+              next.delete(currentId);
+              return next;
+            });
+            setAssets((prev) => prev.map((a) => (a.id === currentId ? saved : a)));
+          },
+        });
         resetForm();
       } else {
         const nextOrder =
@@ -147,21 +176,70 @@ export function ManageAssetsView() {
             (max, a) => Math.max(max, Number.isFinite(a.order_index) ? Number(a.order_index) : -1),
             -1
           ) + 1;
-        const { data, error } = await supabase
-          .from('assets')
-          .insert([
-            { ...payload, user_id: user.id, price_toman: 0, price_usd: 0, order_index: nextOrder },
-          ])
-          .select()
-          .single();
-
-        if (error) throw error;
-        setAssets((prev) => [...prev, data]);
+        const snapshot = assets;
+        const tempId = `temp-asset-${crypto.randomUUID()}`;
+        const optimisticAsset: Asset = {
+          id: tempId,
+          user_id: user.id,
+          category_id: payload.category_id,
+          name: payload.name,
+          unit: payload.unit,
+          decimal_places: payload.decimal_places,
+          price_toman: 0,
+          price_usd: 0,
+          icon_url: payload.icon_url,
+          price_source_id: payload.price_source_id,
+          include_in_profit_loss: payload.include_in_profit_loss,
+          include_in_balance: payload.include_in_balance,
+          order_index: nextOrder,
+          created_at: new Date().toISOString(),
+        };
+        await runOptimisticMutation({
+          snapshot,
+          applyOptimistic: () => {
+            setPendingAssetIds((prev) => new Set(prev).add(tempId));
+            setAssets((prev) => [...prev, optimisticAsset]);
+          },
+          rollback: (prev) => {
+            setPendingAssetIds((p) => {
+              const next = new Set(p);
+              next.delete(tempId);
+              return next;
+            });
+            setAssets(prev);
+          },
+          commit: async () => {
+            const { data, error } = await supabase
+              .from('assets')
+              .insert([
+                { ...payload, user_id: user.id, price_toman: 0, price_usd: 0, order_index: nextOrder },
+              ])
+              .select()
+              .single();
+            if (error) throw error;
+            return data as Asset;
+          },
+          onSuccess: (saved) => {
+            setPendingAssetIds((p) => {
+              const next = new Set(p);
+              next.delete(tempId);
+              return next;
+            });
+            setAssets((prev) => prev.map((a) => (a.id === tempId ? saved : a)));
+          },
+        });
         resetForm();
       }
+    };
+
+    setIsSubmitting(true);
+    try {
+      await execute();
     } catch (err) {
-      toast.error('خطا در ثبت دارایی.');
       console.error(err);
+      toast.error('ثبت دارایی ناموفق بود.', {
+        action: { label: 'تلاش مجدد', onClick: () => void execute() },
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -235,13 +313,42 @@ export function ManageAssetsView() {
     );
     if (!isConfirmed) return;
 
-    try {
-      const { error } = await supabase.from('assets').delete().eq('id', id);
-      if (error) throw error;
-      setAssets((prev) => prev.filter((a) => a.id !== id));
+    const execute = async () => {
+      const snapshot = assets;
+      await runOptimisticMutation({
+        snapshot,
+        applyOptimistic: () => {
+          setPendingAssetIds((prev) => new Set(prev).add(id));
+          setAssets((prev) => prev.filter((a) => a.id !== id));
+        },
+        rollback: (prev) => {
+          setPendingAssetIds((p) => {
+            const next = new Set(p);
+            next.delete(id);
+            return next;
+          });
+          setAssets(prev);
+        },
+        commit: async () => {
+          const { error } = await supabase.from('assets').delete().eq('id', id);
+          if (error) throw error;
+        },
+        onSuccess: () => {
+          setPendingAssetIds((p) => {
+            const next = new Set(p);
+            next.delete(id);
+            return next;
+          });
+        },
+      });
       if (editingId === id) resetForm();
+    };
+    try {
+      await execute();
     } catch {
-      toast.error('خطا در حذف دارایی.');
+      toast.error('حذف دارایی ناموفق بود.', {
+        action: { label: 'تلاش مجدد', onClick: () => void execute() },
+      });
     }
   };
 
@@ -475,6 +582,7 @@ export function ManageAssetsView() {
               sourceLabel={source?.label ?? null}
               onEdit={() => handleEdit(asset)}
               onDelete={() => handleDelete(asset.id)}
+              pending={pendingAssetIds.has(asset.id)}
             />
           );
             })}
@@ -527,6 +635,7 @@ function SortableAssetRow({
   sourceLabel,
   onEdit,
   onDelete,
+  pending,
 }: {
   asset: Asset;
   editing: boolean;
@@ -535,13 +644,14 @@ function SortableAssetRow({
   sourceLabel: string | null;
   onEdit: () => void;
   onDelete: () => void;
+  pending: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: asset.id });
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'} ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''}`}
+      className={`bg-[#1A1B26] p-4 rounded-xl border flex items-center justify-between transition-colors ${editing ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/5'} ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''} ${pending ? 'opacity-60' : ''}`}
     >
       <div className="flex items-center gap-3 min-w-0">
         <button
@@ -584,10 +694,10 @@ function SortableAssetRow({
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        <button onClick={onEdit} className="text-blue-400/60 hover:text-blue-400 p-1.5 bg-blue-500/10 rounded-lg transition-colors">
+        <button disabled={pending} onClick={onEdit} className="text-blue-400/60 hover:text-blue-400 p-1.5 bg-blue-500/10 rounded-lg transition-colors disabled:opacity-40">
           <Edit3 size={14} />
         </button>
-        <button onClick={onDelete} className="text-rose-400/60 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-colors">
+        <button disabled={pending} onClick={onDelete} className="text-rose-400/60 hover:text-rose-400 p-1.5 bg-rose-500/10 rounded-lg transition-colors disabled:opacity-40">
           <Trash2 size={14} />
         </button>
       </div>

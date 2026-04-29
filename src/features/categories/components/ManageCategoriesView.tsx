@@ -31,6 +31,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
 import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
 import { useToast } from '@/shared/components/Toast';
+import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
 import type { Category, CategoryKind } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { CATEGORY_COLORS } from '@/features/categories/constants/category-colors';
@@ -71,6 +72,7 @@ export function ManageCategoriesView() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [pendingCategoryIds, setPendingCategoryIds] = useState<Set<string>>(new Set());
 
   // Categories scoped to the current tab.
   const scoped = useMemo(
@@ -162,19 +164,50 @@ export function ManageCategoriesView() {
       return;
     }
 
-    setIsSubmitting(true);
-    try {
+    const execute = async () => {
       if (form.editingId) {
-        const { data, error } = await supabase
-          .from('categories')
-          .update({ name, color: form.color, parent_id: parentId })
-          .eq('id', form.editingId)
-          .select()
-          .single();
-        if (error) throw error;
-        setCategories((prev) =>
-          prev.map((c) => (c.id === form.editingId ? (data as Category) : c))
-        );
+        const editingId = form.editingId;
+        const snapshot = categories;
+        const patch = { name, color: form.color, parent_id: parentId };
+        await runOptimisticMutation({
+          snapshot,
+          applyOptimistic: () => {
+            setPendingCategoryIds((prev) => new Set(prev).add(editingId));
+            setCategories((prev) =>
+              prev.map((c) =>
+                c.id === editingId ? { ...c, ...patch } : c
+              )
+            );
+          },
+          rollback: (prev) => {
+            setPendingCategoryIds((p) => {
+              const next = new Set(p);
+              next.delete(editingId);
+              return next;
+            });
+            setCategories(prev);
+          },
+          commit: async () => {
+            const { data, error } = await supabase
+              .from('categories')
+              .update(patch)
+              .eq('id', editingId)
+              .select()
+              .single();
+            if (error) throw error;
+            return data as Category;
+          },
+          onSuccess: (saved) => {
+            setPendingCategoryIds((p) => {
+              const next = new Set(p);
+              next.delete(editingId);
+              return next;
+            });
+            setCategories((prev) =>
+              prev.map((c) => (c.id === editingId ? saved : c))
+            );
+          },
+        });
       } else {
         const nextOrder =
           scoped
@@ -183,27 +216,72 @@ export function ManageCategoriesView() {
               (max, c) => Math.max(max, Number.isFinite(c.order_index) ? Number(c.order_index) : -1),
               -1
             ) + 1;
-        const { data, error } = await supabase
-          .from('categories')
-          .insert([
-            {
-              user_id: user.id,
-              name,
-              color: form.color,
-              kind: activeKind,
-              parent_id: parentId,
-              order_index: nextOrder,
-            },
-          ])
-          .select()
-          .single();
-        if (error) throw error;
-        setCategories((prev) => [...prev, data as Category]);
+        const snapshot = categories;
+        const tempId = `temp-category-${crypto.randomUUID()}`;
+        const optimisticCategory: Category = {
+          id: tempId,
+          user_id: user.id,
+          name,
+          color: form.color,
+          kind: activeKind,
+          parent_id: parentId,
+          order_index: nextOrder,
+          created_at: new Date().toISOString(),
+        };
+        await runOptimisticMutation({
+          snapshot,
+          applyOptimistic: () => {
+            setPendingCategoryIds((prev) => new Set(prev).add(tempId));
+            setCategories((prev) => [...prev, optimisticCategory]);
+          },
+          rollback: (prev) => {
+            setPendingCategoryIds((p) => {
+              const next = new Set(p);
+              next.delete(tempId);
+              return next;
+            });
+            setCategories(prev);
+          },
+          commit: async () => {
+            const { data, error } = await supabase
+              .from('categories')
+              .insert([
+                {
+                  user_id: user.id,
+                  name,
+                  color: form.color,
+                  kind: activeKind,
+                  parent_id: parentId,
+                  order_index: nextOrder,
+                },
+              ])
+              .select()
+              .single();
+            if (error) throw error;
+            return data as Category;
+          },
+          onSuccess: (saved) => {
+            setPendingCategoryIds((p) => {
+              const next = new Set(p);
+              next.delete(tempId);
+              return next;
+            });
+            setCategories((prev) =>
+              prev.map((c) => (c.id === tempId ? saved : c))
+            );
+          },
+        });
       }
       resetForm();
+    };
+    setIsSubmitting(true);
+    try {
+      await execute();
     } catch (err) {
       console.error(err);
-      toast.error('خطا در ثبت دسته‌بندی.');
+      toast.error('خطا در ثبت دسته‌بندی.', {
+        action: { label: 'تلاش مجدد', onClick: () => void execute() },
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -221,24 +299,53 @@ export function ManageCategoriesView() {
   const handleDelete = async (cat: Category) => {
     if (!window.confirm(DELETE_PROMPTS[cat.kind])) return;
 
-    try {
-      const { error } = await supabase
-        .from('categories')
-        .delete()
-        .eq('id', cat.id);
-      if (error) throw error;
-      // DB cascades parent_id → null on direct children (and category_id →
-      // null on transactions), so direct children become roots; grandchildren
-      // keep their parent. Mirror that locally.
-      setCategories((prev) =>
-        prev
-          .map((c) => (c.parent_id === cat.id ? { ...c, parent_id: null } : c))
-          .filter((c) => c.id !== cat.id)
-      );
+    const execute = async () => {
+      const snapshot = categories;
+      await runOptimisticMutation({
+        snapshot,
+        applyOptimistic: () => {
+          setPendingCategoryIds((prev) => new Set(prev).add(cat.id));
+          // DB cascades parent_id → null on direct children (and category_id →
+          // null on transactions), so direct children become roots; grandchildren
+          // keep their parent. Mirror that locally.
+          setCategories((prev) =>
+            prev
+              .map((c) => (c.parent_id === cat.id ? { ...c, parent_id: null } : c))
+              .filter((c) => c.id !== cat.id)
+          );
+        },
+        rollback: (prev) => {
+          setPendingCategoryIds((p) => {
+            const next = new Set(p);
+            next.delete(cat.id);
+            return next;
+          });
+          setCategories(prev);
+        },
+        commit: async () => {
+          const { error } = await supabase
+            .from('categories')
+            .delete()
+            .eq('id', cat.id);
+          if (error) throw error;
+        },
+        onSuccess: () => {
+          setPendingCategoryIds((p) => {
+            const next = new Set(p);
+            next.delete(cat.id);
+            return next;
+          });
+        },
+      });
       if (form.editingId === cat.id) resetForm();
+    };
+    try {
+      await execute();
     } catch (err) {
       console.error(err);
-      toast.error('خطا در حذف.');
+      toast.error('خطا در حذف.', {
+        action: { label: 'تلاش مجدد', onClick: () => void execute() },
+      });
     }
   };
 
@@ -445,6 +552,7 @@ export function ManageCategoriesView() {
                 childrenByParent={childrenByParent}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
+                pendingIds={pendingCategoryIds}
               />
             ))}
           </SortableContext>
@@ -475,6 +583,7 @@ interface CategoryNodeProps {
   childrenByParent: Map<string, Category[]>;
   onEdit: (c: Category) => void;
   onDelete: (c: Category) => void;
+  pendingIds: Set<string>;
 }
 
 function CategoryNode({
@@ -483,16 +592,18 @@ function CategoryNode({
   childrenByParent,
   onEdit,
   onDelete,
+  pendingIds,
 }: CategoryNodeProps) {
   const kids = childrenByParent.get(category.id) ?? [];
   const compact = depth > 0;
+  const pending = pendingIds.has(category.id);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: category.id });
   return (
     <div className="space-y-2">
       <div
         ref={setNodeRef}
         style={{ transform: CSS.Transform.toString(transform), transition }}
-        className={`bg-[#1A1B26] ${compact ? 'p-3' : 'p-4'} rounded-xl border border-white/5 flex items-center justify-between ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''}`}
+        className={`bg-[#1A1B26] ${compact ? 'p-3' : 'p-4'} rounded-xl border border-white/5 flex items-center justify-between ${isDragging ? 'opacity-70 ring-1 ring-purple-400/30' : ''} ${pending ? 'opacity-60' : ''}`}
       >
         <div className="flex items-center gap-3 min-w-0">
           <button
@@ -518,6 +629,7 @@ function CategoryNode({
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => onEdit(category)}
+            disabled={pending}
             className="text-blue-400/50 hover:text-blue-400 p-1.5 transition-colors"
             aria-label="ویرایش"
           >
@@ -525,6 +637,7 @@ function CategoryNode({
           </button>
           <button
             onClick={() => onDelete(category)}
+            disabled={pending}
             className="text-rose-400/50 hover:text-rose-400 p-1.5 transition-colors"
             aria-label="حذف"
           >
@@ -543,6 +656,7 @@ function CategoryNode({
                 childrenByParent={childrenByParent}
                 onEdit={onEdit}
                 onDelete={onDelete}
+                pendingIds={pendingIds}
               />
             ))}
           </SortableContext>
