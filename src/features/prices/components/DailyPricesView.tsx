@@ -16,6 +16,16 @@ import {
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
 
+const toTomanInput = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  return String(Math.round(value));
+};
+
+const toUsdInput = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  return value.toFixed(2);
+};
+
 export function DailyPricesView() {
   const router = useRouter();
   const toast = useToast();
@@ -36,8 +46,8 @@ export function DailyPricesView() {
     const p: LocalPrices = {};
     assets.forEach((a) => {
       p[a.id] = {
-        toman: a.price_toman ? String(a.price_toman) : '',
-        usd: a.price_usd ? String(a.price_usd) : '',
+        toman: toTomanInput(Number(a.price_toman)),
+        usd: toUsdInput(Number(a.price_usd)),
       };
     });
     setLocalPrices(p);
@@ -90,10 +100,10 @@ export function DailyPricesView() {
         const quote = quoteBySlug.get(slug);
         if (!quote) continue;
         next[asset.id] = {
-          toman: String(quote.priceToman),
+          toman: toTomanInput(quote.priceToman),
           usd:
             nextUsdRate > 0
-              ? String(quote.priceToman / nextUsdRate)
+              ? toUsdInput(quote.priceToman / nextUsdRate)
               : (next[asset.id]?.usd ?? ''),
         };
       }
@@ -141,13 +151,13 @@ export function DailyPricesView() {
           !Number.isNaN(n) &&
           effectiveUsd > 0
         ) {
-          newUsd = String(n / effectiveUsd);
+          newUsd = toUsdInput(n / effectiveUsd);
         }
       } else {
         newUsd = canonical;
         const n = Number(canonical);
         if (canonical !== '' && canonical !== '.' && !Number.isNaN(n)) {
-          newToman = String(n * effectiveUsd);
+          newToman = toTomanInput(n * effectiveUsd);
         }
       }
       return { ...prev, [id]: { toman: newToman, usd: newUsd } };
@@ -166,7 +176,7 @@ export function DailyPricesView() {
         const row = next[id]!;
         const u = Number(row.usd);
         if (row.usd !== '' && !Number.isNaN(u)) {
-          next[id] = { ...row, toman: String(u * newUsd) };
+          next[id] = { ...row, toman: toTomanInput(u * newUsd) };
         }
       }
       return next;
@@ -183,8 +193,11 @@ export function DailyPricesView() {
         category_id: a.category_id,
         name: a.name,
         unit: a.unit,
+        decimal_places: a.decimal_places,
         price_toman: Number(localPrices[a.id]?.toman || 0),
         price_usd: Number(localPrices[a.id]?.usd || 0),
+        icon_url: a.icon_url,
+        price_source_id: a.price_source_id,
         include_in_profit_loss: a.include_in_profit_loss ?? true,
         include_in_balance: a.include_in_balance ?? true,
       }));
