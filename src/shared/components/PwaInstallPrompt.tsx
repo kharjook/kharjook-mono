@@ -29,11 +29,9 @@ function isSafari() {
 export function PwaInstallPrompt() {
   const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(false);
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => isStandaloneMode());
 
   useEffect(() => {
-    setIsInstalled(isStandaloneMode());
-
     const onBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       setPromptEvent(event as BeforeInstallPromptEvent);
@@ -59,8 +57,10 @@ export function PwaInstallPrompt() {
   );
 
   const showInstall = !isInstalled && !dismissed && !!promptEvent;
+  const showFallbackHint =
+    !isInstalled && !dismissed && !promptEvent && !(isiOS() && isSafari());
 
-  if (!showInstall && !showIosHint) return null;
+  if (!showInstall && !showIosHint && !showFallbackHint) return null;
 
   return (
     <div className="px-4 pt-3">
@@ -71,7 +71,9 @@ export function PwaInstallPrompt() {
             <p className="text-[11px] text-slate-300 mt-1 leading-5">
               {showInstall
                 ? 'برای تجربه شبیه اپ، خرجوک را روی هوم‌اسکرین نصب کن.'
-                : 'در آیفون: Safari > Share > Add to Home Screen'}
+                : showIosHint
+                  ? 'در آیفون: Safari > Share > Add to Home Screen'
+                  : 'در اندروید/دسکتاپ: منوی مرورگر > Install app / Add to Home Screen'}
             </p>
           </div>
           <button
@@ -103,6 +105,15 @@ export function PwaInstallPrompt() {
             <span className="text-[10px] text-slate-400">
               بعد از نصب، اپ بدون نوار مرورگر باز می‌شود.
             </span>
+          </div>
+        )}
+
+        {showFallbackHint && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-2.5">
+            <p className="text-[10px] text-slate-400 leading-5">
+              اگر دکمه نصب مرورگر ظاهر نمی‌شود، یک بار صفحه را Hard Refresh کن و
+              از HTTPS استفاده کن. سپس از منوی مرورگر گزینه Install app را بزن.
+            </p>
           </div>
         )}
       </div>
