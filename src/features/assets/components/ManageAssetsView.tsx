@@ -21,6 +21,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -41,6 +42,7 @@ import {
 } from '@/shared/components/ListSheetPicker';
 import { useToast } from '@/shared/components/Toast';
 import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
+import { haptic } from '@/shared/utils/haptics';
 import {
   PRICE_SOURCES,
   findPriceSource,
@@ -268,6 +270,7 @@ export function ManageAssetsView() {
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    haptic('selection');
     setAssets((prev) => {
       const fromIndex = prev.findIndex((a) => a.id === active.id);
       const toIndex = prev.findIndex((a) => a.id === over.id);
@@ -276,6 +279,10 @@ export function ManageAssetsView() {
       void persistAssetOrder(reordered);
       return reordered;
     });
+  };
+
+  const onDragStart = (_event: DragStartEvent) => {
+    haptic('light');
   };
 
   const handleEdit = (asset: Asset) => {
@@ -565,7 +572,12 @@ export function ManageAssetsView() {
         <h3 className="text-sm font-semibold text-slate-400 mb-4">
           دارایی‌های تعریف شده
         </h3>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={assets.map((a) => a.id)} strategy={verticalListSortingStrategy}>
             {assets.map((asset) => {
           const cat = categories.find((c) => c.id === asset.category_id);

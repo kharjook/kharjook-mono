@@ -8,6 +8,7 @@ import { useUI } from '@/features/portfolio/PortfolioProvider';
 import { BottomNav } from '@/features/shell/components/BottomNav';
 import { PwaInstallPrompt } from '@/shared/components/PwaInstallPrompt';
 import { RouteTransitionBar } from '@/shared/components/RouteTransitionBar';
+import { haptic } from '@/shared/utils/haptics';
 
 const TAB_ROUTES = new Set<string>(['/', '/assets', '/wallets', '/deadlines']);
 
@@ -32,13 +33,17 @@ export function Shell({ children, modal }: ShellProps) {
           <div className="flex items-center gap-2">
             <Link
               href="/settings"
+              onClick={() => haptic('selection')}
               aria-label="تنظیمات"
               className="w-10 h-10 rounded-2xl bg-[#1A1B26] border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:border-purple-500/40 transition-colors"
             >
               <Settings size={18} />
             </Link>
             <button
-              onClick={toggleCurrency}
+              onClick={() => {
+                haptic('selection');
+                toggleCurrency();
+              }}
               className="flex items-center gap-2 bg-[#222436] p-1 rounded-full border border-purple-500/20 transition-all hover:border-purple-500/50"
             >
               <div

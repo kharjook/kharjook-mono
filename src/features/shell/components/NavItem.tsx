@@ -21,7 +21,7 @@ export function NavItem({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex flex-col items-center gap-1.5 transition-colors ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${isActive ? 'text-purple-400' : 'text-slate-500 hover:text-slate-400'}`}
+      className={`flex flex-col items-center gap-1.5 transition-colors active:scale-95 ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${isActive ? 'text-purple-400' : 'text-slate-500 hover:text-slate-400'}`}
     >
       <div
         className={`p-1.5 rounded-xl transition-all ${isActive ? 'bg-purple-500/20' : 'bg-transparent'}`}

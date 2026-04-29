@@ -20,6 +20,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -32,6 +33,7 @@ import { supabase } from '@/shared/lib/supabase/client';
 import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
 import { useToast } from '@/shared/components/Toast';
 import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
+import { haptic } from '@/shared/utils/haptics';
 import type { Category, CategoryKind } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { CATEGORY_COLORS } from '@/features/categories/constants/category-colors';
@@ -391,7 +393,11 @@ export function ManageCategoriesView() {
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    haptic('selection');
     void reorderCategorySiblings(String(active.id), String(over.id));
+  };
+  const onDragStart = (_event: DragStartEvent) => {
+    haptic('light');
   };
 
   const namePlaceholder =
@@ -542,7 +548,12 @@ export function ManageCategoriesView() {
             هیچ دسته‌بندی ثبت نشده.
           </p>
         )}
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={roots.map((r) => r.id)} strategy={verticalListSortingStrategy}>
             {roots.map((root) => (
               <CategoryNode

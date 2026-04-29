@@ -11,6 +11,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -25,6 +26,7 @@ import { IconPicker } from '@/shared/components/IconPicker';
 import { useToast } from '@/shared/components/Toast';
 import { formatCurrencyAmount } from '@/shared/utils/format-currency';
 import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
+import { haptic } from '@/shared/utils/haptics';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Currency, Wallet } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -236,6 +238,7 @@ export function ManageWalletsView() {
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    haptic('selection');
     setWallets((prev) => {
       const fromIndex = prev.findIndex((w) => w.id === active.id);
       const toIndex = prev.findIndex((w) => w.id === over.id);
@@ -244,6 +247,10 @@ export function ManageWalletsView() {
       void persistWalletOrder(reordered);
       return reordered;
     });
+  };
+
+  const onDragStart = (_event: DragStartEvent) => {
+    haptic('light');
   };
 
   const handleArchive = async (w: Wallet) => {
@@ -429,7 +436,12 @@ export function ManageWalletsView() {
       </form>
 
       <div className="px-6 pt-6 space-y-3">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+        >
           <SortableContext items={wallets.map((w) => w.id)} strategy={verticalListSortingStrategy}>
             {wallets.map((w) => {
           const meta = CURRENCY_META[w.currency];

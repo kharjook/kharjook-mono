@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Ban, Check, Search } from 'lucide-react';
 import { BottomSheet } from '@/shared/components/BottomSheet';
+import { haptic } from '@/shared/utils/haptics';
 
 export interface ListSheetPickerItem {
   id: string;
@@ -62,6 +63,7 @@ export function ListSheetPicker({
   }, [items, query]);
 
   const commit = (id: string | null) => {
+    haptic('selection');
     onSelect(id);
     onClose();
     setQuery('');

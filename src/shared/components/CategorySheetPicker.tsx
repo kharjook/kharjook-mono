@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Ban, ChevronDown, ChevronLeft, Folder, Search } from 'lucide-react';
 import { BottomSheet } from '@/shared/components/BottomSheet';
+import { haptic } from '@/shared/utils/haptics';
 import type { Category, CategoryKind } from '@/shared/types/domain';
 
 export interface CategorySheetPickerProps {
@@ -159,6 +160,7 @@ export function CategorySheetPicker({
   }, [value, maps, isSearching]);
 
   const commit = (id: string | null) => {
+    haptic('selection');
     onSelect(id);
     onClose();
     setQuery('');

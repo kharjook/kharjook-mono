@@ -2,12 +2,14 @@
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { haptic } from '@/shared/utils/haptics';
 
 const subscribeNoop = () => () => {};
 const getClientSnapshot = () => true;
@@ -59,22 +61,56 @@ export function BottomSheet({
   // Drag-to-close. We only track the handle, not the whole sheet, because
   // we don't want to hijack scroll inside the body.
   const [dragY, setDragY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const startYRef = useRef<number | null>(null);
+  const crossedThresholdRef = useRef(false);
+  const prevOpenRef = useRef(open);
+  const closeThreshold = 120;
+  const maxDrag = 260;
+
+  useEffect(() => {
+    if (open && !prevOpenRef.current) haptic('light');
+    prevOpenRef.current = open;
+  }, [open]);
+
+  const applyDrag = useMemo(
+    () => (rawDy: number) => {
+      const dy = Math.max(0, Math.min(maxDrag, rawDy));
+      const crossed = dy > closeThreshold;
+      if (crossed !== crossedThresholdRef.current) {
+        crossedThresholdRef.current = crossed;
+        haptic(crossed ? 'selection' : 'light');
+      }
+      setDragY(dy);
+    },
+    []
+  );
 
   const onTouchStart = (e: React.TouchEvent) => {
     if (!dismissOnDrag) return;
+    setIsDragging(true);
     startYRef.current = e.touches[0]!.clientY;
   };
   const onTouchMove = (e: React.TouchEvent) => {
     if (startYRef.current == null) return;
     const dy = e.touches[0]!.clientY - startYRef.current;
-    setDragY(Math.max(0, dy));
+    applyDrag(dy);
   };
   const onTouchEnd = () => {
     if (startYRef.current == null) return;
     startYRef.current = null;
-    if (dragY > 120) onClose();
+    setIsDragging(false);
+    crossedThresholdRef.current = false;
+    if (dragY > closeThreshold) {
+      haptic('medium');
+      onClose();
+    }
     setDragY(0);
+  };
+
+  const closeWithHaptic = () => {
+    haptic('light');
+    onClose();
   };
 
   if (!mounted) return null;
@@ -89,7 +125,7 @@ export function BottomSheet({
       <button
         type="button"
         aria-label="بستن"
-        onClick={onClose}
+        onClick={closeWithHaptic}
         className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
           open ? 'opacity-100' : 'opacity-0'
         }`}
@@ -97,7 +133,9 @@ export function BottomSheet({
 
       {/* Sheet */}
       <div
-        className={`absolute inset-x-0 bottom-0 mx-auto w-full sm:max-w-md bg-[#13141C] rounded-t-3xl border-t border-white/10 shadow-2xl transition-transform duration-300 ease-out ${
+        className={`absolute inset-x-0 bottom-0 mx-auto w-full sm:max-w-md bg-[#13141C] rounded-t-3xl border-t border-white/10 shadow-2xl transition-transform ease-out ${
+          isDragging ? 'duration-75' : 'duration-300'
+        } ${
           open ? 'translate-y-0' : 'translate-y-full'
         }`}
         style={{
@@ -115,6 +153,7 @@ export function BottomSheet({
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
+          onTouchCancel={onTouchEnd}
         >
           <div className="mx-auto w-10 h-1 rounded-full bg-white/20" />
         </div>
