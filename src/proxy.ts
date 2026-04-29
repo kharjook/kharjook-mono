@@ -1,7 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/shared/lib/supabase/proxy-client';
 
-const PUBLIC_ROUTES = ['/login', '/register', '/api/prices/quotes'];
+const PUBLIC_ROUTES = [
+  '/login',
+  '/register',
+  '/api/prices/quotes',
+  '/manifest.webmanifest',
+  '/sw.js',
+  '/icon',
+  '/icon-192',
+  '/icon-maskable',
+  '/apple-icon',
+];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -32,6 +42,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
