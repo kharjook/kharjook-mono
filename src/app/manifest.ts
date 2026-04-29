@@ -2,11 +2,11 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    id: '/',
+    id: '/login?source=pwa',
     name: 'خرجوک',
     short_name: 'خرجوک',
     description: 'مدیریت سبد دارایی و تراکنش‌ها',
-    start_url: '/',
+    start_url: '/login?source=pwa',
     scope: '/',
     display: 'standalone',
     display_override: ['standalone', 'minimal-ui'],
