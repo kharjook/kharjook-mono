@@ -34,6 +34,7 @@ export const metadata: Metadata = {
   title: 'خرجوک',
   description: 'مدیریت سبد دارایی',
   applicationName: 'خرجوک',
+  manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     title: 'خرجوک',

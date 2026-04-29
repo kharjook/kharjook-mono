@@ -2,6 +2,7 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: '/',
     name: 'خرجوک',
     short_name: 'خرجوک',
     description: 'مدیریت سبد دارایی و تراکنش‌ها',
@@ -12,9 +13,27 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: 'portrait',
     background_color: '#0F1015',
     theme_color: '#0F1015',
+    prefer_related_applications: false,
     lang: 'fa',
     dir: 'rtl',
     categories: ['finance', 'productivity'],
+    shortcuts: [
+      {
+        name: 'ثبت تراکنش',
+        short_name: 'تراکنش',
+        url: '/transactions/new',
+      },
+      {
+        name: 'بروزرسانی قیمت‌ها',
+        short_name: 'قیمت‌ها',
+        url: '/prices',
+      },
+      {
+        name: 'سررسیدها',
+        short_name: 'سررسید',
+        url: '/deadlines',
+      },
+    ],
     icons: [
       {
         src: '/icon',

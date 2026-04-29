@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { Settings } from 'lucide-react';
 import { useUI } from '@/features/portfolio/PortfolioProvider';
 import { BottomNav } from '@/features/shell/components/BottomNav';
+import { PwaInstallPrompt } from '@/shared/components/PwaInstallPrompt';
+import { RouteTransitionBar } from '@/shared/components/RouteTransitionBar';
 
 const TAB_ROUTES = new Set<string>(['/', '/assets', '/wallets', '/deadlines']);
 
@@ -25,6 +27,7 @@ export function Shell({ children, modal }: ShellProps) {
   return (
     <div className="bg-[#0F1015] text-slate-200 min-h-dvh font-sans flex justify-center selection:bg-purple-500/30">
       <div className="w-full sm:max-w-md bg-[#161722] relative sm:shadow-2xl flex flex-col h-dvh overflow-hidden sm:border-x border-slate-800">
+        <RouteTransitionBar />
         <header className="px-6 py-4 pt-safe flex justify-between items-center bg-[#1A1B26] border-b border-white/5 z-10">
           <div className="flex items-center gap-2">
             <Link
@@ -60,6 +63,8 @@ export function Shell({ children, modal }: ShellProps) {
             </span>
           </div>
         </header>
+
+        <PwaInstallPrompt />
 
         <main
           data-app-scroll="main"
