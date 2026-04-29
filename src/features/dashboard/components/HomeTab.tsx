@@ -7,6 +7,7 @@ import {
   AlertCircle,
   CalendarClock,
   DollarSign,
+  Sparkles,
   Plus,
 } from 'lucide-react';
 import { supabase } from '@/shared/lib/supabase/client';
@@ -19,7 +20,7 @@ import { currentPeriod } from '@/shared/utils/period';
 import { formatJalaali, formatJalaaliHuman, parseJalaali, todayJalaali } from '@/shared/utils/jalali';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
 import { effectivePriceAt } from '@/features/reports/utils/price-history';
-import type { LoanInstallment } from '@/shared/types/domain';
+import type { Loan, LoanInstallment } from '@/shared/types/domain';
 
 export function HomeTab() {
   const router = useRouter();
@@ -34,21 +35,38 @@ export function HomeTab() {
     isLoadingData,
   } = useData();
   const { currencyMode, usdRate } = useUI();
-  const [upcomingDeadline, setUpcomingDeadline] = useState<LoanInstallment | null>(null);
+  const [upcomingDeadlines, setUpcomingDeadlines] = useState<Array<LoanInstallment & { loanTitle?: string }>>([]);
 
   useEffect(() => {
     if (!user) return;
     let mounted = true;
-    void supabase
-      .from('loan_installments')
-      .select('*')
-      .eq('is_paid', false)
-      .order('due_date_string', { ascending: true })
-      .limit(1)
-      .then(({ data }) => {
-        if (!mounted) return;
-        setUpcomingDeadline(((data ?? [])[0] as LoanInstallment | undefined) ?? null);
-      });
+    void (async () => {
+      const { data } = await supabase
+        .from('loan_installments')
+        .select('*')
+        .eq('is_paid', false)
+        .order('due_date_string', { ascending: true })
+        .limit(4);
+      if (!mounted) return;
+      const installments = ((data ?? []) as LoanInstallment[]);
+      if (installments.length === 0) {
+        setUpcomingDeadlines([]);
+        return;
+      }
+      const loanIds = Array.from(new Set(installments.map((item) => item.loan_id)));
+      const { data: loansData } = await supabase
+        .from('loans')
+        .select('id,title')
+        .in('id', loanIds);
+      if (!mounted) return;
+      const loanMap = new Map(((loansData ?? []) as Pick<Loan, 'id' | 'title'>[]).map((loan) => [loan.id, loan.title]));
+      setUpcomingDeadlines(
+        installments.map((item) => ({
+          ...item,
+          loanTitle: loanMap.get(item.loan_id),
+        }))
+      );
+    })();
     return () => {
       mounted = false;
     };
@@ -241,6 +259,19 @@ export function HomeTab() {
       ? valueToman / usdRate
       : valueToman;
 
+  const deadlineRows = upcomingDeadlines.map((item) => {
+    const amount =
+      currencyMode === 'USD' && usdRate > 0
+        ? item.amount / usdRate
+        : item.amount;
+    return {
+      id: item.id,
+      title: item.loanTitle ?? 'بدهی',
+      dueLabel: formatJalaaliHuman(parseJalaali(item.due_date_string) ?? today),
+      amountLabel: formatCurrency(amount, currencyMode),
+    };
+  });
+
   return (
     <div className="p-6 space-y-5 animate-in fade-in duration-300">
       <div className="flex items-center justify-between">
@@ -250,17 +281,14 @@ export function HomeTab() {
         </span>
       </div>
 
-      <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4">
-        <p className="text-xs text-slate-400 mb-1">ارزش کل پورتفو</p>
-        <p className="text-3xl font-bold text-white" dir="ltr">
-          {formatCurrency(displayPortfolio, currencyMode)}
-        </p>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4">
-          <p className="text-xs text-slate-400 mb-1">قیمت دلار</p>
-          <p className="text-lg font-semibold text-white" dir="ltr">
+        <div className="bg-linear-to-br from-emerald-500/15 via-teal-500/10 to-cyan-500/10 border border-emerald-400/20 rounded-3xl p-5 relative overflow-hidden">
+          <div className="absolute -top-8 -left-8 w-24 h-24 rounded-full bg-emerald-400/10 blur-2xl" />
+          <div className="flex items-center gap-2 text-emerald-300 mb-2">
+            <DollarSign size={16} />
+            <span className="text-sm font-medium">قیمت دلار</span>
+          </div>
+          <p className="text-2xl font-bold text-white" dir="ltr">
             {usdRateRow ? `${Number(usdRateRow.toman_per_unit).toLocaleString('fa-IR')} تومان` : '—'}
           </p>
           <p className="text-[11px] text-slate-500 mt-2">
@@ -270,11 +298,13 @@ export function HomeTab() {
               : '—'}
           </p>
         </div>
-        <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4">
-          <p className="text-xs text-slate-400 mb-1">سود سال جاری</p>
-          <p className={`text-lg font-semibold ${displayYearProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
-            {displayYearProfit >= 0 ? '+' : ''}
-            {formatCurrency(displayYearProfit, currencyMode)}
+        <div className="bg-linear-to-br from-purple-500/15 via-fuchsia-500/10 to-transparent border border-white/5 rounded-3xl p-5">
+          <div className="flex items-center gap-2 text-purple-300 mb-2">
+            <Sparkles size={16} />
+            <span className="text-sm font-medium">ارزش کل پورتفو</span>
+          </div>
+          <p className="text-3xl font-bold text-white" dir="ltr">
+            {formatCurrency(displayPortfolio, currencyMode)}
           </p>
         </div>
       </div>
@@ -315,27 +345,41 @@ export function HomeTab() {
             <CalendarClock size={16} />
             <span className="text-sm font-medium">سررسید</span>
           </div>
-          <p className="text-xs text-slate-500 mt-2">
-            {upcomingDeadline
-              ? `نزدیک‌ترین: ${formatJalaaliHuman(parseJalaali(upcomingDeadline.due_date_string) ?? today)}`
-              : 'سررسید پرداخت‌نشده‌ای وجود ندارد'}
-          </p>
+          {deadlineRows.length === 0 ? (
+            <p className="text-xs text-slate-500 mt-2">سررسید پرداخت‌نشده‌ای وجود ندارد</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {deadlineRows.map((row) => (
+                <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/5 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-200 truncate">{row.title}</p>
+                    <p className="text-[10px] text-slate-500">{row.dueLabel}</p>
+                  </div>
+                  <span className="text-[11px] text-amber-300 shrink-0" dir="ltr">
+                    {row.amountLabel}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <DistributionCard
+        <DistributionChartCard
           title="توزیع دارایی اصلی"
           rows={stats.mainDistribution.slice(0, 6).map((r) => ({
             name: r.name,
-            value: formatCurrency(convertDistribution(r.valueToman), currencyMode),
+            value: convertDistribution(r.valueToman),
+            label: formatCurrency(convertDistribution(r.valueToman), currencyMode),
           }))}
         />
-        <DistributionCard
+        <DistributionChartCard
           title="توزیع دارایی فرعی"
           rows={stats.subDistribution.slice(0, 6).map((r) => ({
             name: r.name,
-            value: formatCurrency(convertDistribution(r.valueToman), currencyMode),
+            value: convertDistribution(r.valueToman),
+            label: formatCurrency(convertDistribution(r.valueToman), currencyMode),
           }))}
         />
       </div>
@@ -387,15 +431,17 @@ function MetricCard({
   );
 }
 
-function DistributionCard({
+function DistributionChartCard({
   title,
   rows,
 }: {
   title: string;
-  rows: Array<{ name: string; value: string }>;
+  rows: Array<{ name: string; value: number; label: string }>;
 }) {
+  const palette = ['#8b5cf6', '#06b6d4', '#22c55e', '#f59e0b', '#ef4444', '#ec4899'];
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
   return (
-    <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4">
+    <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4 overflow-hidden">
       <p className="text-xs text-slate-400 mb-2">{title}</p>
       {rows.length === 0 ? (
         <div className="text-xs text-slate-500 inline-flex items-center gap-1">
@@ -403,16 +449,51 @@ function DistributionCard({
           بدون داده
         </div>
       ) : (
-        <div className="space-y-2">
-          {rows.map((row) => (
-            <div key={row.name} className="flex items-center justify-between gap-3">
-              <span className="text-sm text-slate-300 truncate">{row.name}</span>
-              <span className="text-xs text-slate-400 shrink-0" dir="ltr">
-                {row.value}
-              </span>
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="flex h-3 w-full overflow-hidden rounded-full bg-white/5 mb-4">
+            {rows.map((row, index) => (
+              <div
+                key={row.name}
+                className="h-full transition-all duration-500"
+                style={{
+                  width: `${total > 0 ? (row.value / total) * 100 : 0}%`,
+                  backgroundColor: palette[index % palette.length],
+                }}
+              />
+            ))}
+          </div>
+          <div className="space-y-3">
+            {rows.map((row, index) => {
+              const percent = total > 0 ? (row.value / total) * 100 : 0;
+              return (
+                <div key={row.name} className="space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: palette[index % palette.length] }}
+                      />
+                      <span className="text-sm text-slate-300 truncate">{row.name}</span>
+                    </div>
+                    <div className="text-left shrink-0">
+                      <div className="text-xs text-slate-300" dir="ltr">{row.label}</div>
+                      <div className="text-[10px] text-slate-500" dir="ltr">{percent.toFixed(1)}%</div>
+                    </div>
+                  </div>
+                  <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${percent}%`,
+                        background: `linear-gradient(90deg, ${palette[index % palette.length]}, rgba(255,255,255,0.85))`,
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
