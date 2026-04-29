@@ -9,6 +9,7 @@ import { supabase } from '@/shared/lib/supabase/client';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { formatCurrency } from '@/shared/utils/format-currency';
+import { assetDecimals, formatAssetAmount } from '@/shared/utils/format-asset-amount';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import { sortTransactionsNewestFirst } from '@/shared/utils/sort-transactions';
 import { DetailCard } from '@/features/assets/components/DetailCard';
@@ -64,6 +65,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   }
 
   const stats = calculateAssetStats(asset, transactions, currencyMode, usdRate);
+  const decimals = assetDecimals(asset);
 
   const displayValue =
     currencyMode === 'USD' ? stats.currentValueUsd : stats.currentValueToman;
@@ -180,7 +182,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
         <div className="grid grid-cols-2 gap-4">
           <DetailCard
             label="موجودی"
-            value={`${stats.totalAmount} ${asset.unit}`}
+            value={`${formatAssetAmount(stats.totalAmount, decimals)} ${asset.unit}`}
           />
           <DetailCard
             label="میانگین خرید"
@@ -271,7 +273,7 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
                   </div>
                   <div className="text-left">
                     <p className="text-slate-200 font-bold text-sm" dir="ltr">
-                      {amount} {asset.unit}
+                      {formatAssetAmount(amount, decimals)} {asset.unit}
                     </p>
                     <p className="text-slate-500 text-xs mt-1" dir="ltr">
                       {formatCurrency(tx.price_toman, 'TOMAN')}

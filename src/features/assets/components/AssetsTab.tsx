@@ -8,6 +8,7 @@ import type { Asset, Category } from '@/shared/types/domain';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { formatCurrency } from '@/shared/utils/format-currency';
+import { assetDecimals, formatAssetAmount } from '@/shared/utils/format-asset-amount';
 
 export function AssetsTab() {
   const router = useRouter();
@@ -99,6 +100,7 @@ export function AssetsTab() {
                     ? stats.profitLossUsd
                     : stats.profitLossToman;
                 const isProfit = displayProfit >= 0;
+                const decimals = assetDecimals(asset);
 
                 return (
                   <div
@@ -119,7 +121,7 @@ export function AssetsTab() {
                           {asset.name}
                         </h3>
                         <p className="text-xs text-slate-500 mt-1">
-                          {stats.totalAmount} {asset.unit}
+                          {formatAssetAmount(stats.totalAmount, decimals)} {asset.unit}
                         </p>
                         {asset.include_in_balance === false && (
                           <p className="text-[10px] text-sky-300/80 mt-1">

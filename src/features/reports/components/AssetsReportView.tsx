@@ -16,6 +16,7 @@ import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import type { CurrencyMode } from '@/shared/types/domain';
 import { EntityIcon } from '@/shared/components/EntityIcon';
 import { formatCurrency } from '@/shared/utils/format-currency';
+import { assetDecimals, formatAssetAmount } from '@/shared/utils/format-asset-amount';
 import {
   decodePeriodParams,
   encodePeriodParams,
@@ -430,6 +431,7 @@ function AssetRow({
     if (!src) return null;
     return stats.periodEndPriceSourceDate;
   }, [stats.periodEndPriceSourceDate, stats.unrealizedAvailable]);
+  const decimals = assetDecimals(asset);
 
   return (
     <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-3 space-y-3">
@@ -446,9 +448,7 @@ function AssetRow({
           <div className="text-[10px] text-slate-500">
             موجودی در پایان دوره:{' '}
             <span className=" text-slate-400">
-              {stats.endHoldings.toLocaleString('en-US', {
-                maximumFractionDigits: 6,
-              })}{' '}
+              {formatAssetAmount(stats.endHoldings, decimals)}{' '}
               {asset.unit}
             </span>
           </div>
@@ -474,6 +474,7 @@ function AssetRow({
             label="خرید دوره"
             units={stats.bought.units}
             unit={asset.unit}
+            decimals={decimals}
             avgToman={stats.bought.avgPriceToman}
             avgUsd={stats.bought.avgPriceUsd}
             count={stats.bought.count}
@@ -485,6 +486,7 @@ function AssetRow({
             label="فروش دوره"
             units={stats.sold.units}
             unit={asset.unit}
+            decimals={decimals}
             avgToman={stats.sold.avgPriceToman}
             avgUsd={stats.sold.avgPriceUsd}
             count={stats.sold.count}
@@ -632,6 +634,7 @@ function TradeBox({
   label,
   units,
   unit,
+  decimals,
   avgToman,
   avgUsd,
   count,
@@ -642,6 +645,7 @@ function TradeBox({
   label: string;
   units: number;
   unit: string;
+  decimals: number;
   avgToman: number;
   avgUsd: number;
   count: number;
@@ -661,7 +665,7 @@ function TradeBox({
         <span className="text-[10px] text-slate-600 mr-auto">({count})</span>
       </div>
       <div className="text-xs  text-white">
-        {units.toLocaleString('en-US', { maximumFractionDigits: 6 })}{' '}
+        {formatAssetAmount(units, decimals)}{' '}
         <span className="text-[10px] text-slate-500">{unit}</span>
       </div>
       <div className="text-[10px] text-slate-500 mt-1">میانگین قیمت</div>

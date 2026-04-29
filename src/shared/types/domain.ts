@@ -36,6 +36,8 @@ export interface Asset {
   category_id: string | null;
   name: string;
   unit: string;
+  /** UI-only display precision for asset quantities. */
+  decimal_places: number;
   price_toman: number;
   price_usd: number;
   icon_url: string | null;

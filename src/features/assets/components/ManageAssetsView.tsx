@@ -55,6 +55,7 @@ export function ManageAssetsView() {
   const [formData, setFormData] = useState({
     name: '',
     unit: '',
+    decimalPlaces: 4,
     categoryId: '',
     iconUrl: null as string | null,
     priceSourceId: '' as string,
@@ -118,10 +119,12 @@ export function ManageAssetsView() {
     setIsSubmitting(true);
 
     try {
+      const decimalPlaces = Math.max(0, Math.min(12, Math.trunc(Number(formData.decimalPlaces))));
       const payload = {
         category_id: formData.categoryId || null,
         name: formData.name,
         unit: formData.unit,
+        decimal_places: Number.isFinite(decimalPlaces) ? decimalPlaces : 4,
         icon_url: formData.iconUrl,
         price_source_id: formData.priceSourceId || null,
         include_in_profit_loss: formData.includeInProfitLoss,
@@ -202,6 +205,7 @@ export function ManageAssetsView() {
     setFormData({
       name: asset.name,
       unit: asset.unit,
+      decimalPlaces: Number.isFinite(asset.decimal_places) ? asset.decimal_places : 4,
       categoryId: asset.category_id || '',
       iconUrl: asset.icon_url ?? null,
       priceSourceId: asset.price_source_id ?? '',
@@ -216,6 +220,7 @@ export function ManageAssetsView() {
     setFormData({
       name: '',
       unit: '',
+      decimalPlaces: 4,
       categoryId: '',
       iconUrl: null,
       priceSourceId: '',
@@ -340,6 +345,26 @@ export function ManageAssetsView() {
                 required
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-2">
+              تعداد اعشار نمایش مقدار
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={12}
+              step={1}
+              value={formData.decimalPlaces}
+              onChange={(e) =>
+                setFormData({ ...formData, decimalPlaces: Number(e.target.value) })
+              }
+              className="w-full bg-[#222436] border border-white/5 rounded-xl p-3 text-white text-sm placeholder-slate-600 focus:border-purple-500 outline-none transition-all"
+              required
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              فقط نمایش UI را کنترل می‌کند و مقدار ذخیره‌شده را تغییر نمی‌دهد.
+            </p>
           </div>
 
           <div>

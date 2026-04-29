@@ -28,6 +28,7 @@ import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import { formatCurrencyAmount } from '@/shared/utils/format-currency';
+import { assetDecimals, formatAssetAmount } from '@/shared/utils/format-asset-amount';
 import {
   formatJalaaliHuman,
   parseJalaali,
@@ -1884,7 +1885,7 @@ function DirectionCard({
         {filled && (
           <p className={`text-[11px] mt-0.5  ${insufficient ? 'text-rose-400' : 'text-slate-500'}`} dir="ltr">
             {balance != null
-              ? `${wallet ? formatCurrencyAmount(balance, wallet.currency) : balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${unit.trim()}`
+              ? `${wallet ? formatCurrencyAmount(balance, wallet.currency) : asset ? formatAssetAmount(balance, assetDecimals(asset)) : balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${unit.trim()}`
               : kind === 'person'
                 ? 'حساب شخص'
                 : unit}
@@ -2233,25 +2234,33 @@ function summarizeForm(
   const srcAmt = Number(form.sourceAmount);
   const tgtAmt = Number(form.targetAmount);
   const category = categories.find((c) => c.id === form.categoryId);
+  const sourceAsset = form.sourceKind === 'asset'
+    ? assets.find((a) => a.id === form.sourceId)
+    : null;
+  const targetAsset = form.targetKind === 'asset'
+    ? assets.find((a) => a.id === form.targetId)
+    : null;
 
-  const fmt = (n: number) =>
-    Number.isFinite(n) && n > 0
-      ? n.toLocaleString('en-US', { maximumFractionDigits: 6 })
-      : '—';
+  const fmt = (n: number, side: 'source' | 'target') => {
+    if (!Number.isFinite(n) || n <= 0) return '—';
+    if (side === 'source' && sourceAsset) return formatAssetAmount(n, assetDecimals(sourceAsset));
+    if (side === 'target' && targetAsset) return formatAssetAmount(n, assetDecimals(targetAsset));
+    return n.toLocaleString('en-US', { maximumFractionDigits: 6 });
+  };
 
   const label = TYPE_STYLES[form.type].label;
 
   switch (form.type) {
     case 'BUY':
-      return `${label} · ${fmt(tgtAmt)} ${targetName ?? '...'} از ${sourceName ?? '...'}`;
+      return `${label} · ${fmt(tgtAmt, 'target')} ${targetName ?? '...'} از ${sourceName ?? '...'}`;
     case 'SELL':
-      return `${label} · ${fmt(srcAmt)} ${sourceName ?? '...'} → ${targetName ?? '...'}`;
+      return `${label} · ${fmt(srcAmt, 'source')} ${sourceName ?? '...'} → ${targetName ?? '...'}`;
     case 'TRANSFER':
-      return `${label} · ${fmt(srcAmt)} از ${sourceName ?? '...'} به ${targetName ?? '...'}`;
+      return `${label} · ${fmt(srcAmt, 'source')} از ${sourceName ?? '...'} به ${targetName ?? '...'}`;
     case 'INCOME':
-      return `${label} · ${fmt(tgtAmt)} → ${targetName ?? '...'}${category ? ` · ${category.name}` : ''}`;
+      return `${label} · ${fmt(tgtAmt, 'target')} → ${targetName ?? '...'}${category ? ` · ${category.name}` : ''}`;
     case 'EXPENSE':
-      return `${label} · ${fmt(srcAmt)} از ${sourceName ?? '...'}${category ? ` · ${category.name}` : ''}`;
+      return `${label} · ${fmt(srcAmt, 'source')} از ${sourceName ?? '...'}${category ? ` · ${category.name}` : ''}`;
   }
 }
 
