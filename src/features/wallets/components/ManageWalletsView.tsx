@@ -130,7 +130,6 @@ export function ManageWalletsView() {
 
   const persistWalletOrder = async (ordered: Wallet[]) => {
     const normalized = ordered.map((w, i) => ({ ...w, order_index: i }));
-    setWallets(normalized);
     const updates = normalized.map((w) =>
       supabase.from('wallets').update({ order_index: w.order_index }).eq('id', w.id)
     );
@@ -152,10 +151,14 @@ export function ManageWalletsView() {
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const fromIndex = wallets.findIndex((w) => w.id === active.id);
-    const toIndex = wallets.findIndex((w) => w.id === over.id);
-    if (fromIndex < 0 || toIndex < 0) return;
-    void persistWalletOrder(arrayMove(wallets, fromIndex, toIndex));
+    setWallets((prev) => {
+      const fromIndex = prev.findIndex((w) => w.id === active.id);
+      const toIndex = prev.findIndex((w) => w.id === over.id);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const reordered = arrayMove(prev, fromIndex, toIndex);
+      void persistWalletOrder(reordered);
+      return reordered;
+    });
   };
 
   const handleArchive = async (w: Wallet) => {
@@ -365,6 +368,7 @@ function SortableWalletRow({
           type="button"
           {...attributes}
           {...listeners}
+          style={{ touchAction: 'none' }}
           className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
           aria-label="جابجایی"
         >

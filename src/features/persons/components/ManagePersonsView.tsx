@@ -101,7 +101,6 @@ export function ManagePersonsView() {
 
   const persistOrder = async (ordered: Person[]) => {
     const normalized = ordered.map((p, i) => ({ ...p, order_index: i }));
-    setPersons(normalized);
     const results = await Promise.all(
       normalized.map((p) =>
         supabase.from('persons').update({ order_index: p.order_index }).eq('id', p.id)
@@ -123,10 +122,14 @@ export function ManagePersonsView() {
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const fromIndex = persons.findIndex((p) => p.id === active.id);
-    const toIndex = persons.findIndex((p) => p.id === over.id);
-    if (fromIndex < 0 || toIndex < 0) return;
-    void persistOrder(arrayMove(persons, fromIndex, toIndex));
+    setPersons((prev) => {
+      const fromIndex = prev.findIndex((p) => p.id === active.id);
+      const toIndex = prev.findIndex((p) => p.id === over.id);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const reordered = arrayMove(prev, fromIndex, toIndex);
+      void persistOrder(reordered);
+      return reordered;
+    });
   };
 
   const handleEdit = (person: Person) => {
@@ -273,6 +276,7 @@ function SortablePersonRow({
           type="button"
           {...attributes}
           {...listeners}
+          style={{ touchAction: 'none' }}
           className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
           aria-label="جابجایی"
         >

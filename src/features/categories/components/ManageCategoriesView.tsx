@@ -244,21 +244,26 @@ export function ManageCategoriesView() {
 
   const reorderCategorySiblings = async (activeId: string, overId: string) => {
     if (activeId === overId) return;
-    const from = scoped.find((c) => c.id === activeId);
-    const to = scoped.find((c) => c.id === overId);
-    if (!from || !to) return;
-    if ((from.parent_id ?? null) !== (to.parent_id ?? null)) return;
-    const siblings = scoped.filter((c) => (c.parent_id ?? null) === (from.parent_id ?? null));
-    const fromIndex = siblings.findIndex((c) => c.id === activeId);
-    const toIndex = siblings.findIndex((c) => c.id === overId);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const nextSiblings = arrayMove(siblings, fromIndex, toIndex);
-    const withOrder = new Map<string, number>();
-    nextSiblings.forEach((c, idx) => withOrder.set(c.id, idx));
-    const nextCategories = categories.map((c) =>
-      withOrder.has(c.id) ? { ...c, order_index: withOrder.get(c.id) } : c
-    );
-    setCategories(nextCategories);
+    let nextSiblings: Category[] = [];
+    setCategories((prev) => {
+      const scopedPrev = prev.filter((c) => c.kind === activeKind);
+      const from = scopedPrev.find((c) => c.id === activeId);
+      const to = scopedPrev.find((c) => c.id === overId);
+      if (!from || !to) return prev;
+      if ((from.parent_id ?? null) !== (to.parent_id ?? null)) return prev;
+      const siblings = scopedPrev.filter((c) => (c.parent_id ?? null) === (from.parent_id ?? null));
+      const fromIndex = siblings.findIndex((c) => c.id === activeId);
+      const toIndex = siblings.findIndex((c) => c.id === overId);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+
+      nextSiblings = arrayMove(siblings, fromIndex, toIndex);
+      const withOrder = new Map<string, number>();
+      nextSiblings.forEach((c, idx) => withOrder.set(c.id, idx));
+      return prev.map((c) =>
+        withOrder.has(c.id) ? { ...c, order_index: withOrder.get(c.id) } : c
+      );
+    });
+    if (nextSiblings.length === 0) return;
     const results = await Promise.all(
       nextSiblings.map((c, idx) =>
         supabase.from('categories').update({ order_index: idx }).eq('id', c.id)
@@ -494,6 +499,7 @@ function CategoryNode({
             type="button"
             {...attributes}
             {...listeners}
+            style={{ touchAction: 'none' }}
             className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
             aria-label="جابجایی"
           >

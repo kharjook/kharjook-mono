@@ -166,7 +166,6 @@ export function ManageAssetsView() {
 
   const persistAssetOrder = async (ordered: Asset[]) => {
     const normalized = ordered.map((a, i) => ({ ...a, order_index: i }));
-    setAssets(normalized);
     const results = await Promise.all(
       normalized.map((a) =>
         supabase.from('assets').update({ order_index: a.order_index }).eq('id', a.id)
@@ -188,10 +187,14 @@ export function ManageAssetsView() {
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const fromIndex = assets.findIndex((a) => a.id === active.id);
-    const toIndex = assets.findIndex((a) => a.id === over.id);
-    if (fromIndex < 0 || toIndex < 0) return;
-    void persistAssetOrder(arrayMove(assets, fromIndex, toIndex));
+    setAssets((prev) => {
+      const fromIndex = prev.findIndex((a) => a.id === active.id);
+      const toIndex = prev.findIndex((a) => a.id === over.id);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const reordered = arrayMove(prev, fromIndex, toIndex);
+      void persistAssetOrder(reordered);
+      return reordered;
+    });
   };
 
   const handleEdit = (asset: Asset) => {
@@ -520,6 +523,7 @@ function SortableAssetRow({
           type="button"
           {...attributes}
           {...listeners}
+          style={{ touchAction: 'none' }}
           className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-slate-300 cursor-grab active:cursor-grabbing"
           aria-label="جابجایی"
         >
