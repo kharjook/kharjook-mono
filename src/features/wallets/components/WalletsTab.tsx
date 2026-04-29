@@ -7,7 +7,7 @@ import { EntityIcon } from '@/shared/components/EntityIcon';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
-import { formatCurrency } from '@/shared/utils/format-currency';
+import { formatCurrency, formatCurrencyAmount } from '@/shared/utils/format-currency';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 
 export function WalletsTab() {
@@ -104,9 +104,7 @@ export function WalletsTab() {
                     </p>
                     <p className="text-xs text-slate-500 mt-1 " dir="ltr">
                       {meta.symbol}{' '}
-                      {stats.balance.toLocaleString('en-US', {
-                        maximumFractionDigits: meta.decimals,
-                      })}{' '}
+                      {formatCurrencyAmount(stats.balance, wallet.currency)}{' '}
                       {wallet.currency}
                     </p>
                   </div>
@@ -118,7 +116,7 @@ export function WalletsTab() {
                     </p>
                     {(stats.incomeTotal > 0 || stats.expenseTotal > 0) && (
                       <p className="text-[10px] text-slate-500 mt-0.5" dir="ltr">
-                        +{stats.incomeTotal.toLocaleString('en-US', { maximumFractionDigits: meta.decimals })} / -{stats.expenseTotal.toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}
+                        +{formatCurrencyAmount(stats.incomeTotal, wallet.currency)} / -{formatCurrencyAmount(stats.expenseTotal, wallet.currency)}
                       </p>
                     )}
                   </div>

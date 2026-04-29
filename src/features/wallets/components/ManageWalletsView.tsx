@@ -23,6 +23,7 @@ import { EntityIcon } from '@/shared/components/EntityIcon';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { IconPicker } from '@/shared/components/IconPicker';
 import { useToast } from '@/shared/components/Toast';
+import { formatCurrencyAmount } from '@/shared/utils/format-currency';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Currency, Wallet } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
@@ -384,7 +385,7 @@ function SortableWalletRow({
         <div className="min-w-0">
           <p className="text-slate-200 text-sm font-medium truncate">{wallet.name}</p>
           <p className="text-slate-500 text-xs mt-0.5" dir="ltr">
-            {metaLabel.symbol} {Number(wallet.initial_balance).toLocaleString('en-US', { maximumFractionDigits: metaLabel.decimals })} · {wallet.currency}
+            {metaLabel.symbol} {formatCurrencyAmount(wallet.initial_balance, wallet.currency)} · {wallet.currency}
           </p>
         </div>
       </div>

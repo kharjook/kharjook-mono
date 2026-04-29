@@ -27,6 +27,7 @@ import { IOSDatePicker } from '@/shared/components/IOSDatePicker';
 import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import { formatCurrency } from '@/shared/utils/format-currency';
+import { formatCurrencyAmount } from '@/shared/utils/format-currency';
 import {
   formatJalaaliHuman,
   parseJalaali,
@@ -1883,7 +1884,7 @@ function DirectionCard({
         {filled && (
           <p className={`text-[11px] mt-0.5  ${insufficient ? 'text-rose-400' : 'text-slate-500'}`} dir="ltr">
             {balance != null
-              ? `${balance.toLocaleString('en-US', { maximumFractionDigits: wallet ? CURRENCY_META[wallet.currency].decimals : 6 })} ${unit.trim()}`
+              ? `${wallet ? formatCurrencyAmount(balance, wallet.currency) : balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${unit.trim()}`
               : kind === 'person'
                 ? 'حساب شخص'
                 : unit}
@@ -2003,7 +2004,9 @@ function DerivedAmountLine({
     : `مبلغ دریافتی${unit ? ` (${unit})` : ''}`;
 
   const display = value
-    ? Number(value).toLocaleString('en-US', { maximumFractionDigits: 10 })
+    ? wallet
+      ? formatCurrencyAmount(value, wallet.currency)
+      : Number(value).toLocaleString('en-US', { maximumFractionDigits: 10 })
     : '—';
 
   return (
@@ -2356,10 +2359,10 @@ function BulkTotalsStrip({
           <div key={cur} className="flex justify-between text-[11px] text-slate-400 " dir="ltr">
             <span>{cur}</span>
             <span>
-              {inflow > 0 && <span className="text-emerald-400">+{inflow.toLocaleString('en-US', { maximumFractionDigits: 4 })} </span>}
-              {outflow > 0 && <span className="text-rose-400">-{outflow.toLocaleString('en-US', { maximumFractionDigits: 4 })} </span>}
+              {inflow > 0 && <span className="text-emerald-400">+{formatCurrencyAmount(inflow, cur)} </span>}
+              {outflow > 0 && <span className="text-rose-400">-{formatCurrencyAmount(outflow, cur)} </span>}
               <span className={net >= 0 ? 'text-slate-300' : 'text-slate-300'}>
-                = {net >= 0 ? '+' : ''}{net.toLocaleString('en-US', { maximumFractionDigits: 4 })} {sym}
+                = {net >= 0 ? '+' : ''}{formatCurrencyAmount(net, cur)} {sym}
               </span>
             </span>
           </div>

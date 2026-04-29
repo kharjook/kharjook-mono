@@ -17,6 +17,7 @@ import type {
 } from '@/shared/types/domain';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
+import { formatCurrencyAmount } from '@/shared/utils/format-currency';
 
 export type EndpointKind = 'wallet' | 'asset' | 'person';
 
@@ -186,9 +187,7 @@ export function EndpointSheetPicker({
                       className="text-xs  text-slate-300"
                       dir="ltr"
                     >
-                      {stats.balance.toLocaleString('en-US', {
-                        maximumFractionDigits: meta.decimals,
-                      })}
+                      {formatCurrencyAmount(stats.balance, w.currency)}
                     </span>
                   }
                 />

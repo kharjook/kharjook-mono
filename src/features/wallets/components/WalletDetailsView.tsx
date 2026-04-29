@@ -19,7 +19,7 @@ import type { Asset, Transaction, TransactionType, Wallet } from '@/shared/types
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
-import { formatCurrency } from '@/shared/utils/format-currency';
+import { formatCurrency, formatCurrencyAmount } from '@/shared/utils/format-currency';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { DetailCard } from '@/features/assets/components/DetailCard';
@@ -129,9 +129,7 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
           <p className="text-slate-400 text-sm mb-2">موجودی فعلی</p>
           <p className="text-3xl font-bold text-white" dir="ltr">
             {meta.symbol}{' '}
-            {stats.balance.toLocaleString('en-US', {
-              maximumFractionDigits: meta.decimals,
-            })}
+            {formatCurrencyAmount(stats.balance, wallet.currency)}
           </p>
           <p className="text-xs text-slate-500 mt-2" dir="ltr">
             ≈ {formatCurrency(balanceDisplay, currencyMode)}
@@ -141,19 +139,19 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
         <div className="grid grid-cols-2 gap-4">
           <DetailCard
             label="موجودی اولیه"
-            value={`${meta.symbol} ${Number(wallet.initial_balance).toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}`}
+            value={`${meta.symbol} ${formatCurrencyAmount(wallet.initial_balance, wallet.currency)}`}
           />
           <DetailCard
             label="جریان خالص"
-            value={`${stats.netFlow >= 0 ? '+' : ''}${meta.symbol} ${stats.netFlow.toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}`}
+            value={`${stats.netFlow >= 0 ? '+' : ''}${meta.symbol} ${formatCurrencyAmount(stats.netFlow, wallet.currency)}`}
           />
           <DetailCard
             label="جمع درآمد"
-            value={`${meta.symbol} ${stats.incomeTotal.toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}`}
+            value={`${meta.symbol} ${formatCurrencyAmount(stats.incomeTotal, wallet.currency)}`}
           />
           <DetailCard
             label="جمع هزینه"
-            value={`${meta.symbol} ${stats.expenseTotal.toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}`}
+            value={`${meta.symbol} ${formatCurrencyAmount(stats.expenseTotal, wallet.currency)}`}
           />
         </div>
 
@@ -257,7 +255,7 @@ function TxRow({
         <div className="text-left shrink-0">
           <p className={`text-sm font-bold  ${tone}`} dir="ltr">
             {isIn ? '+' : '-'}
-            {meta.symbol} {Math.abs(displayAmount).toLocaleString('en-US', { maximumFractionDigits: meta.decimals })}
+            {meta.symbol} {formatCurrencyAmount(Math.abs(displayAmount), wallet.currency)}
           </p>
           <p className="text-[11px] text-slate-500 mt-0.5">
             {latinizeDigits(tx.date_string)}
