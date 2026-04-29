@@ -76,3 +76,13 @@ export function formatJalaaliHuman(d: JalaaliDate): string {
 export function equalsJalaali(a: JalaaliDate, b: JalaaliDate): boolean {
   return a.jy === b.jy && a.jm === b.jm && a.jd === b.jd;
 }
+
+/**
+ * Weekday index in Jalali calendar view convention:
+ * 0 شنبه ... 6 جمعه
+ */
+export function jalaaliWeekday(d: JalaaliDate): number {
+  const g = j.toGregorian(d.jy, d.jm, d.jd);
+  const jsDay = new Date(g.gy, g.gm - 1, g.gd).getDay(); // 0 Sun ... 6 Sat
+  return (jsDay + 1) % 7; // 0 Sat ... 6 Fri
+}

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CreditCard,
   Loader2,
   Plus,
@@ -15,13 +17,26 @@ import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
 import type { Loan, LoanInstallment, Transaction } from '@/shared/types/domain';
 import { formatCurrency } from '@/shared/utils/format-currency';
-import { formatJalaaliHuman, JALALI_MONTHS, parseJalaali } from '@/shared/utils/jalali';
+import {
+  formatJalaali,
+  formatJalaaliHuman,
+  jalaaliMonthLength,
+  jalaaliWeekday,
+  JALALI_MONTHS,
+  parseJalaali,
+  todayJalaali,
+} from '@/shared/utils/jalali';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { ListSheetPicker } from '@/shared/components/ListSheetPicker';
 
-type TabKey = 'loans' | 'installments';
+type TabKey = 'loans' | 'installments' | 'calendar';
 type InstallmentFilter = 'all' | 'paid' | 'remaining';
+type InstallmentRow = { installment: LoanInstallment; loan: Loan };
+
+const WEEKDAY_LABELS = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'] as const;
+const toFaDigits = (value: number | string) =>
+  String(value).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[Number(c)]!);
 
 export function LoansHubView() {
   const router = useRouter();
@@ -39,6 +54,13 @@ export function LoansHubView() {
   const [settlementWalletId, setSettlementWalletId] = useState<string | null>(null);
   const [isSettlementPickerOpen, setIsSettlementPickerOpen] = useState(false);
   const [installmentFilter, setInstallmentFilter] = useState<InstallmentFilter>('all');
+  const today = useMemo(() => todayJalaali(), []);
+  const todayStr = useMemo(() => formatJalaali(today), [today]);
+  const [calendarMonth, setCalendarMonth] = useState<{ jy: number; jm: number }>({
+    jy: today.jy,
+    jm: today.jm,
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(todayStr);
 
   const refresh = useCallback(async () => {
     if (!user) return;
@@ -84,13 +106,25 @@ export function LoansHubView() {
     });
   }, [installments, loans]);
 
-  const installmentRows = useMemo(() => {
+  const installmentRows = useMemo<InstallmentRow[]>(() => {
     return installments
       .map((it) => ({ installment: it, loan: loansById.get(it.loan_id) ?? null }))
       .filter(
         (row): row is { installment: LoanInstallment; loan: Loan } => row.loan !== null
       );
   }, [installments, loansById]);
+
+  const displayAmount = useCallback(
+    (row: InstallmentRow) => {
+      const loanRate = tomanPerUnit(row.loan.currency, currencyRates);
+      if (!(loanRate > 0)) return row.installment.amount;
+      if (currencyMode === 'USD' && usdRate > 0) {
+        return (row.installment.amount * loanRate) / usdRate;
+      }
+      return row.installment.amount;
+    },
+    [currencyMode, currencyRates, usdRate]
+  );
 
   const filteredInstallmentRows = useMemo(() => {
     if (installmentFilter === 'all') return installmentRows;
@@ -123,6 +157,74 @@ export function LoansHubView() {
     }
     return Array.from(groups.values());
   }, [filteredInstallmentRows]);
+
+  const monthKey = `${calendarMonth.jy}/${String(calendarMonth.jm).padStart(2, '0')}`;
+  const monthLength = useMemo(
+    () => jalaaliMonthLength(calendarMonth.jy, calendarMonth.jm),
+    [calendarMonth.jm, calendarMonth.jy]
+  );
+  const firstWeekday = useMemo(
+    () => jalaaliWeekday({ jy: calendarMonth.jy, jm: calendarMonth.jm, jd: 1 }),
+    [calendarMonth.jm, calendarMonth.jy]
+  );
+  const monthInstallments = useMemo(
+    () =>
+      installmentRows.filter(
+        (row) =>
+          !row.installment.is_paid &&
+          row.installment.due_date_string.startsWith(`${monthKey}/`)
+      ),
+    [installmentRows, monthKey]
+  );
+  const installmentsByDate = useMemo(() => {
+    const map = new Map<string, InstallmentRow[]>();
+    for (const row of monthInstallments) {
+      const key = row.installment.due_date_string;
+      const bucket = map.get(key) ?? [];
+      bucket.push(row);
+      map.set(key, bucket);
+    }
+    return map;
+  }, [monthInstallments]);
+  const selectedDayRows = useMemo(
+    () => installmentsByDate.get(selectedCalendarDate) ?? [],
+    [installmentsByDate, selectedCalendarDate]
+  );
+  const selectedDayLabel = useMemo(() => {
+    const parsed = parseJalaali(selectedCalendarDate);
+    return parsed ? formatJalaaliHuman(parsed) : selectedCalendarDate;
+  }, [selectedCalendarDate]);
+  const monthRemainingTotal = useMemo(() => {
+    return monthInstallments.reduce((sum, row) => sum + displayAmount(row), 0);
+  }, [displayAmount, monthInstallments]);
+  const selectedRemainingTotal = useMemo(() => {
+    return selectedDayRows.reduce((sum, row) => sum + displayAmount(row), 0);
+  }, [displayAmount, selectedDayRows]);
+  const calendarCells = useMemo(() => {
+    const out: Array<{ date: string; day: number; rows: InstallmentRow[] } | null> = [];
+    for (let i = 0; i < firstWeekday; i += 1) out.push(null);
+    for (let day = 1; day <= monthLength; day += 1) {
+      const date = `${monthKey}/${String(day).padStart(2, '0')}`;
+      out.push({ date, day, rows: installmentsByDate.get(date) ?? [] });
+    }
+    while (out.length % 7 !== 0) out.push(null);
+    return out;
+  }, [firstWeekday, installmentsByDate, monthKey, monthLength]);
+
+  useEffect(() => {
+    const parsed = parseJalaali(selectedCalendarDate);
+    if (parsed && parsed.jy === calendarMonth.jy && parsed.jm === calendarMonth.jm) return;
+    setSelectedCalendarDate(`${monthKey}/01`);
+  }, [calendarMonth.jm, calendarMonth.jy, monthKey, selectedCalendarDate]);
+
+  const moveCalendarMonth = (delta: 1 | -1) => {
+    setCalendarMonth((prev) => {
+      if (delta === 1) {
+        return prev.jm === 12 ? { jy: prev.jy + 1, jm: 1 } : { jy: prev.jy, jm: prev.jm + 1 };
+      }
+      return prev.jm === 1 ? { jy: prev.jy - 1, jm: 12 } : { jy: prev.jy, jm: prev.jm - 1 };
+    });
+  };
 
   const remainingTotalDisplay = useMemo(() => {
     const remainingRows = installmentRows.filter((row) => !row.installment.is_paid);
@@ -275,7 +377,7 @@ export function LoansHubView() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-1 bg-[#1A1B26] p-1 rounded-xl">
+      <div className="grid grid-cols-3 gap-1 bg-[#1A1B26] p-1 rounded-xl">
         <button
           type="button"
           onClick={() => setTab('loans')}
@@ -293,6 +395,15 @@ export function LoansHubView() {
           }`}
         >
           اقساط
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('calendar')}
+          className={`py-2 text-xs font-bold rounded-lg transition-all ${
+            tab === 'calendar' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          تقویم بدهی
         </button>
       </div>
 
@@ -376,7 +487,7 @@ export function LoansHubView() {
             })}
           </div>
         )
-      ) : installmentRows.length === 0 ? (
+      ) : tab === 'installments' ? installmentRows.length === 0 ? (
         <div className="text-center py-10 space-y-2">
           <p className="text-slate-500 text-sm">قسطی برای نمایش نیست.</p>
           <p className="text-slate-600 text-xs">بعد از ثبت وام، برنامه اقساط اینجا نمایش داده می‌شود.</p>
@@ -437,11 +548,7 @@ export function LoansHubView() {
               {group.rows.map(({ installment, loan }) => {
                 const parsed = parseJalaali(installment.due_date_string);
                 const dueLabel = parsed ? formatJalaaliHuman(parsed) : installment.due_date_string;
-                const loanRate = tomanPerUnit(loan.currency, currencyRates);
-                const amountDisplay =
-                  currencyMode === 'USD' && usdRate > 0
-                    ? (installment.amount * loanRate) / usdRate
-                    : installment.amount;
+                const amountDisplay = displayAmount({ installment, loan });
                 return (
                   <div
                     key={installment.id}
@@ -475,6 +582,123 @@ export function LoansHubView() {
               })}
             </div>
           ))}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => moveCalendarMonth(1)}
+                className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 inline-flex items-center justify-center"
+                aria-label="ماه بعد"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-white">
+                  {JALALI_MONTHS[calendarMonth.jm - 1]} {toFaDigits(calendarMonth.jy)}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  جمع بدهی ماه: {formatCurrency(monthRemainingTotal, currencyMode)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => moveCalendarMonth(-1)}
+                className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 inline-flex items-center justify-center"
+                aria-label="ماه قبل"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-center">
+              {WEEKDAY_LABELS.map((label) => (
+                <div key={label} className="text-[11px] text-slate-500 py-1">
+                  {label}
+                </div>
+              ))}
+              {calendarCells.map((cell, idx) => {
+                if (!cell) {
+                  return <div key={`empty-${idx}`} className="h-12 rounded-lg bg-transparent" />;
+                }
+                const isSelected = selectedCalendarDate === cell.date;
+                const isToday = cell.date === todayStr;
+                const isOverdue = cell.rows.length > 0 && cell.date < todayStr;
+                return (
+                  <button
+                    type="button"
+                    key={cell.date}
+                    onClick={() => setSelectedCalendarDate(cell.date)}
+                    className={`h-12 rounded-lg border transition relative ${
+                      isSelected
+                        ? 'bg-purple-600/30 border-purple-500/60'
+                        : cell.rows.length > 0
+                          ? 'bg-amber-500/8 border-amber-500/30 hover:bg-amber-500/15'
+                          : 'bg-white/3 border-white/5 hover:bg-white/6'
+                    }`}
+                  >
+                    <span
+                      className={`text-xs ${isSelected ? 'text-purple-100 font-bold' : 'text-slate-300'}`}
+                    >
+                      {toFaDigits(cell.day)}
+                    </span>
+                    {cell.rows.length > 0 && (
+                      <span
+                        className={`absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] px-1.5 rounded-full ${
+                          isOverdue ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'
+                        }`}
+                      >
+                        {toFaDigits(cell.rows.length)}
+                      </span>
+                    )}
+                    {isToday && (
+                      <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-sky-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-100">{selectedDayLabel}</h3>
+              <span className="text-xs text-slate-400" dir="ltr">
+                {formatCurrency(selectedRemainingTotal, currencyMode)}
+              </span>
+            </div>
+            {selectedDayRows.length === 0 ? (
+              <p className="text-xs text-slate-500 py-3 text-center">برای این روز قسطی ثبت نشده.</p>
+            ) : (
+              <div className="space-y-2">
+                {selectedDayRows.map((row) => (
+                  <div
+                    key={row.installment.id}
+                    className="bg-white/3 border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-100 truncate">{row.loan.title}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        قسط {toFaDigits(row.installment.sequence_no)}
+                      </p>
+                      <p className="text-xs text-slate-200 mt-1" dir="ltr">
+                        {formatCurrency(displayAmount(row), currencyMode)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openSettle(row.installment)}
+                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition shrink-0"
+                    >
+                      <CreditCard size={14} />
+                      تسویه
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
