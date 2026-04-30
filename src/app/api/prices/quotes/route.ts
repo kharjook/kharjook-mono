@@ -35,18 +35,6 @@ interface AbanTetherMarketRow {
   active?: boolean;
 }
 
-interface AbanSocketCoinRow {
-  symbol?: string;
-  coin_symbol?: string;
-  base_symbol?: string;
-  buy?: number | string;
-  sell?: number | string;
-  buy_price?: number | string;
-  sell_price?: number | string;
-  price?: number | string;
-  [key: string]: unknown;
-}
-
 async function fetchText(url: string, init?: RequestInit): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
@@ -143,103 +131,29 @@ async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
 }
 
 async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
-  const ws = new WebSocket('wss://ws.abantether.com/public');
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const close = () => {
-      try {
-        ws.close();
-      } catch {
-        // no-op
-      }
-    };
-    const fail = (error: unknown) => {
-      if (done) return;
-      done = true;
-      close();
-      reject(error instanceof Error ? error : new Error(String(error)));
-    };
-    const succeed = (markets: Record<string, AbanTetherMarketRow>) => {
-      if (done) return;
-      done = true;
-      close();
-      resolve(markets);
-    };
-    const timer = setTimeout(() => fail(new Error('AbanTether websocket timeout')), 20_000);
-    const maxFrames = 20;
-    let seenFrames = 0;
-    const frameSamples: string[] = [];
-    ws.onerror = (event) => {
-      clearTimeout(timer);
-      fail(new Error(`AbanTether websocket error: ${String(event.type)}`));
-    };
-    ws.onclose = () => {
-      if (!done) {
-        clearTimeout(timer);
-        fail(new Error('AbanTether websocket closed before first payload'));
-      }
-    };
-    ws.onopen = () => {
-      // Some WS gateways accept different subscribe envelopes.
-      const packets = [
-        { action: 'subscribe', channel: 'coins_list_v2' },
-        { event: 'subscribe', channel: 'coins_list_v2' },
-        { op: 'subscribe', channel: 'coins_list_v2' },
-        { action: 'subscribe', channels: ['coins_list_v2'] },
-      ];
-      for (const packet of packets) {
-        ws.send(JSON.stringify(packet));
-      }
-    };
-    ws.onmessage = (event) => {
-      seenFrames += 1;
-      try {
-        const rawText = String(event.data ?? '');
-        if (frameSamples.length < 4) frameSamples.push(rawText.slice(0, 300));
-        const raw = JSON.parse(rawText) as unknown;
-        const coins = extractAbanCoins(raw);
-        if (coins.length === 0) {
-          // First frame is often an ack/heartbeat; ignore and keep waiting for
-          // the first payload that actually carries coin rows.
-          if (seenFrames >= maxFrames) {
-            clearTimeout(timer);
-            throw new Error(
-              `AbanTether websocket did not deliver coins payload. samples=${frameSamples.join(' || ')}`
-            );
-          }
-          return;
-        }
-        const markets: Record<string, AbanTetherMarketRow> = {};
-        for (const coin of coins) {
-          const symbol =
-            String(coin.symbol ?? coin.coin_symbol ?? coin.base_symbol ?? '').toUpperCase();
-          if (!symbol) continue;
-          const sell = toNumber(coin.sell_price ?? coin.sell ?? coin.price);
-          const buy = toNumber(coin.buy_price ?? coin.buy ?? coin.price);
-          if (!(sell > 0) && !(buy > 0)) continue;
-          markets[`${symbol}IRT`] = {
-            symbol: `${symbol}IRT`,
-            sell_price: String(sell > 0 ? sell : buy),
-            buy_price: String(buy > 0 ? buy : sell),
-          };
-        }
-        if (Object.keys(markets).length === 0) {
-          if (seenFrames >= maxFrames) {
-            clearTimeout(timer);
-            throw new Error(
-              `AbanTether websocket payload had no usable prices. samples=${frameSamples.join(' || ')}`
-            );
-          }
-          return;
-        }
-        clearTimeout(timer);
-        succeed(markets);
-      } catch (error) {
-        clearTimeout(timer);
-        fail(error);
-      }
-    };
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  let payload = '';
+  try {
+    const response = await fetch('https://api.abantether.com/api/v1/manager/otc/ticker', {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        'user-agent': USER_AGENT,
+        accept: 'application/json',
+      },
+    });
+    payload = await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+  const parsed = JSON.parse(payload) as unknown;
+  const markets = extractAbanMarketsFromPayload(parsed);
+  if (Object.keys(markets).length === 0) {
+    throw new Error(`AbanTether API payload has no parseable markets. body=${payload.slice(0, 300)}`);
+  }
+  return markets;
 }
 
 function toNumber(value: unknown): number {
@@ -247,38 +161,58 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function extractAbanCoins(payload: unknown): AbanSocketCoinRow[] {
-  if (!payload || typeof payload !== 'object') return [];
+function extractAbanMarketsFromPayload(payload: unknown): Record<string, AbanTetherMarketRow> {
+  if (!payload || typeof payload !== 'object') return {};
   const root = payload as Record<string, unknown>;
-  const directCandidates = [root.data, root.payload, root.result, root.coins, root.items];
-  for (const c of directCandidates) {
-    if (Array.isArray(c)) return c as AbanSocketCoinRow[];
-    if (c && typeof c === 'object') {
-      const nested = c as Record<string, unknown>;
-      const arrCandidates = [nested.coins, nested.items, nested.list, nested.data];
-      for (const arr of arrCandidates) {
-        if (Array.isArray(arr)) return arr as AbanSocketCoinRow[];
-      }
-      const mapCandidates = [nested.symbols, nested.markets, nested.tickers];
-      for (const map of mapCandidates) {
-        if (map && typeof map === 'object' && !Array.isArray(map)) {
-          return Object.values(map as Record<string, unknown>).filter(
-            (v): v is AbanSocketCoinRow => !!v && typeof v === 'object'
-          );
-        }
-      }
+  const out: Record<string, AbanTetherMarketRow> = {};
+
+  const oldMarkets = (root.data as { markets?: unknown } | undefined)?.markets;
+  if (oldMarkets && typeof oldMarkets === 'object') {
+    return oldMarkets as Record<string, AbanTetherMarketRow>;
+  }
+
+  const symbols = (
+    (root.data as { symbols?: unknown } | undefined)?.symbols ??
+    root.symbols
+  ) as Record<string, unknown> | undefined;
+  if (symbols && typeof symbols === 'object') {
+    for (const [pair, row] of Object.entries(symbols)) {
+      if (!row || typeof row !== 'object') continue;
+      const rec = row as Record<string, unknown>;
+      const sell = toNumber(rec.sell_price ?? rec.sell ?? rec.price);
+      const buy = toNumber(rec.buy_price ?? rec.buy ?? rec.price);
+      if (!(sell > 0) && !(buy > 0)) continue;
+      out[pair] = {
+        symbol: String(rec.symbol ?? pair),
+        sell_price: String(sell > 0 ? sell : buy),
+        buy_price: String(buy > 0 ? buy : sell),
+      };
     }
   }
-  // Root-level maps
-  const rootMaps = [root.symbols, root.markets, root.tickers];
-  for (const map of rootMaps) {
-    if (map && typeof map === 'object' && !Array.isArray(map)) {
-      return Object.values(map as Record<string, unknown>).filter(
-        (v): v is AbanSocketCoinRow => !!v && typeof v === 'object'
-      );
+
+  const details = root.data;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (!detail || typeof detail !== 'object') continue;
+      const rec = detail as Record<string, unknown>;
+      const loc = rec.loc;
+      const input = rec.input;
+      if (!Array.isArray(loc) || loc.length < 2 || loc[0] !== 'symbols') continue;
+      if (!input || typeof input !== 'object') continue;
+      const pair = String(loc[1]);
+      const row = input as Record<string, unknown>;
+      const sell = toNumber(row.sell_price ?? row.sell ?? row.price);
+      const buy = toNumber(row.buy_price ?? row.buy ?? row.price);
+      if (!(sell > 0) && !(buy > 0)) continue;
+      out[pair] = {
+        symbol: String(row.symbol ?? pair),
+        sell_price: String(sell > 0 ? sell : buy),
+        buy_price: String(buy > 0 ? buy : sell),
+      };
     }
   }
-  return [];
+
+  return out;
 }
 
 function toZarpayQuote(
@@ -426,7 +360,7 @@ export async function POST(request: Request) {
         slug: s.slug,
         reason:
           s.provider === 'abantether' && abanTetherRes.status === 'rejected'
-            ? 'AbanTether websocket unavailable'
+            ? 'AbanTether API unavailable'
             : s.provider === 'zarpay' && zarpayRes.status === 'rejected'
               ? 'Zarpay provider unavailable'
               : 'Provider responded but no quote found for fetchKey',
