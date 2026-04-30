@@ -15,11 +15,11 @@ import type { RateCurrency } from '@/shared/types/domain';
  *     before hitting the DB. Consumers don't care where it came from.
  *
  *  3. `updatesRate` lets a source double as the authoritative FX rate for a
- *     given currency (e.g. `tgju.usd` → writes both the asset's price_toman
- *     AND `currency_rates.USD.toman_per_unit`). This is wired in the fetch
+ *     given currency (e.g. `abantether.usdt` → writes both the asset's
+ *     price_toman AND `currency_rates.USD.toman_per_unit`). This is wired in the fetch
  *     layer later; catalog just declares intent here.
  */
-export type PriceSourceProvider = 'abantether' | 'app' | 'tgju' | 'zarpay';
+export type PriceSourceProvider = 'abantether' | 'zarpay';
 
 /** Synthetic source: asset unit priced at the app’s global USD/Toman rate. */
 export const APP_GLOBAL_USD_SLUG = 'app.dollar' as const;
@@ -41,16 +41,9 @@ export interface PriceSource {
 export const PRICE_SOURCES: readonly PriceSource[] = [
   {
     slug: APP_GLOBAL_USD_SLUG,
-    provider: 'app',
+    provider: 'abantether',
     label: 'دلار',
-    fetchKey: 'GLOBAL_USD',
-    updatesRate: null,
-  },
-  {
-    slug: 'tgju.usd',
-    provider: 'tgju',
-    label: 'دلار آزاد · TGJU',
-    fetchKey: 'USD',
+    fetchKey: 'USDT',
     updatesRate: 'USD',
   },
   {

@@ -35,6 +35,8 @@ import type {
   Wallet,
 } from '@/shared/types/domain';
 
+const USD_RATE_SOURCE_SLUG = 'abantether.usdt';
+
 interface AuthValue {
   user: AuthUser | null;
   isLoadingAuth: boolean;
@@ -171,7 +173,7 @@ export function PortfolioProvider({
         try {
           const providerSlugs = Array.from(
             new Set(
-              ['tgju.usd', ...nextAssets.map((asset) => asset.price_source_id)].filter(
+              [USD_RATE_SOURCE_SLUG, ...nextAssets.map((asset) => asset.price_source_id)].filter(
                 (slug): slug is string => !!slug
               )
             )
@@ -179,7 +181,7 @@ export function PortfolioProvider({
 
           if (providerSlugs.length > 0) {
             const quotesRaw = await fetchProviderQuotes(providerSlugs);
-            const usdQuote = quotesRaw.find((quote) => quote.slug === 'tgju.usd');
+            const usdQuote = quotesRaw.find((quote) => quote.slug === USD_RATE_SOURCE_SLUG);
             const effectiveUsdRate =
               usdQuote?.priceToman && usdQuote.priceToman > 0
                 ? usdQuote.priceToman

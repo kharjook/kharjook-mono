@@ -5,10 +5,9 @@ import {
   findPriceSource,
   type PriceSource,
 } from '@/features/prices/constants/price-sources';
-import { fetchTgjuUsdToman } from './tgju-usd';
 
 export const runtime = 'nodejs';
-/** Vercel / long upstream chains (Jina + TGJU + Zarpay challenge). */
+/** Vercel / long upstream chains (Aban WS + Zarpay challenge). */
 export const maxDuration = 45;
 
 const USER_AGENT =
@@ -34,6 +33,18 @@ interface AbanTetherMarketRow {
   buy_price: string;
   sell_price: string;
   active?: boolean;
+}
+
+interface AbanSocketCoinRow {
+  symbol?: string;
+  coin_symbol?: string;
+  base_symbol?: string;
+  buy?: number | string;
+  sell?: number | string;
+  buy_price?: number | string;
+  sell_price?: number | string;
+  price?: number | string;
+  [key: string]: unknown;
 }
 
 async function fetchText(url: string, init?: RequestInit): Promise<string> {
@@ -132,22 +143,100 @@ async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
 }
 
 async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
-  const payload = await fetchText('https://api.abantether.com/api/v1/manager/otc/ticker', {
-    headers: {
-      accept: 'application/json',
-    },
+  const ws = new WebSocket('wss://ws.abantether.com/public');
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const close = () => {
+      try {
+        ws.close();
+      } catch {
+        // no-op
+      }
+    };
+    const fail = (error: unknown) => {
+      if (done) return;
+      done = true;
+      close();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const succeed = (markets: Record<string, AbanTetherMarketRow>) => {
+      if (done) return;
+      done = true;
+      close();
+      resolve(markets);
+    };
+    const timer = setTimeout(() => fail(new Error('AbanTether websocket timeout')), 12_000);
+    ws.onerror = (event) => {
+      clearTimeout(timer);
+      fail(new Error(`AbanTether websocket error: ${String(event.type)}`));
+    };
+    ws.onclose = () => {
+      if (!done) {
+        clearTimeout(timer);
+        fail(new Error('AbanTether websocket closed before first payload'));
+      }
+    };
+    ws.onopen = () => {
+      ws.send(
+        JSON.stringify({
+          action: 'subscribe',
+          channel: 'coins_list_v2',
+        })
+      );
+    };
+    ws.onmessage = (event) => {
+      clearTimeout(timer);
+      try {
+        const raw = JSON.parse(String(event.data)) as unknown;
+        const coins = extractAbanCoins(raw);
+        if (coins.length === 0) {
+          throw new Error('AbanTether first websocket message has no coins list');
+        }
+        const markets: Record<string, AbanTetherMarketRow> = {};
+        for (const coin of coins) {
+          const symbol =
+            String(coin.symbol ?? coin.coin_symbol ?? coin.base_symbol ?? '').toUpperCase();
+          if (!symbol) continue;
+          const sell = toNumber(coin.sell_price ?? coin.sell ?? coin.price);
+          const buy = toNumber(coin.buy_price ?? coin.buy ?? coin.price);
+          if (!(sell > 0) && !(buy > 0)) continue;
+          markets[`${symbol}IRT`] = {
+            symbol: `${symbol}IRT`,
+            sell_price: String(sell > 0 ? sell : buy),
+            buy_price: String(buy > 0 ? buy : sell),
+          };
+        }
+        if (Object.keys(markets).length === 0) {
+          throw new Error('AbanTether first websocket message had no usable prices');
+        }
+        succeed(markets);
+      } catch (error) {
+        fail(error);
+      }
+    };
   });
+}
 
-  const parsed = JSON.parse(payload) as {
-    data?: { markets?: Record<string, AbanTetherMarketRow> };
-  };
-  const markets = parsed.data?.markets;
+function toNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
 
-  if (!markets || typeof markets !== 'object') {
-    throw new Error('AbanTether ticker payload is missing markets.');
+function extractAbanCoins(payload: unknown): AbanSocketCoinRow[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const root = payload as Record<string, unknown>;
+  const directCandidates = [root.data, root.payload, root.result, root.coins, root.items];
+  for (const c of directCandidates) {
+    if (Array.isArray(c)) return c as AbanSocketCoinRow[];
+    if (c && typeof c === 'object') {
+      const nested = c as Record<string, unknown>;
+      const arrCandidates = [nested.coins, nested.items, nested.list, nested.data];
+      for (const arr of arrCandidates) {
+        if (Array.isArray(arr)) return arr as AbanSocketCoinRow[];
+      }
+    }
   }
-
-  return markets;
+  return [];
 }
 
 function toZarpayQuote(
@@ -199,26 +288,21 @@ function toAbanTetherQuote(
   };
 }
 
-function toTgjuQuote(source: PriceSource, usdToman: number): ProviderQuote | null {
-  if (source.provider !== 'tgju' || source.slug !== 'tgju.usd') return null;
-  if (!Number.isFinite(usdToman) || usdToman <= 0) return null;
+function toAppDollarQuote(
+  source: PriceSource,
+  markets: Record<string, AbanTetherMarketRow>
+): ProviderQuote | null {
+  if (source.slug !== APP_GLOBAL_USD_SLUG) return null;
+  const usdt = toAbanTetherQuote(
+    { ...source, provider: 'abantether', fetchKey: 'USDT' },
+    markets
+  );
+  if (!usdt) return null;
 
   return {
     slug: source.slug,
     provider: source.provider,
-    priceToman: usdToman,
-    fetchedAt: new Date().toISOString(),
-  };
-}
-
-function toAppDollarQuote(source: PriceSource, usdToman: number): ProviderQuote | null {
-  if (source.provider !== 'app' || source.slug !== APP_GLOBAL_USD_SLUG) return null;
-  if (!Number.isFinite(usdToman) || usdToman <= 0) return null;
-
-  return {
-    slug: source.slug,
-    provider: source.provider,
-    priceToman: usdToman,
+    priceToman: usdt.priceToman,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -260,31 +344,20 @@ export async function POST(request: Request) {
     const abanTetherSources = sources.filter(
       (source) => source.provider === 'abantether'
     );
-    const tgjuSources = sources.filter((source) => source.provider === 'tgju');
-    const appDollarSources = sources.filter(
-      (source) => source.provider === 'app' && source.slug === APP_GLOBAL_USD_SLUG
-    );
     const zarpaySources = sources.filter((source) => source.provider === 'zarpay');
-    const needsTgjuUsdToman =
-      tgjuSources.length > 0 || appDollarSources.length > 0;
     // Provider outages should degrade partially, not take down the whole API.
-    const [abanTetherRes, tgjuRes, zarpayRes] = await Promise.allSettled([
+    const [abanTetherRes, zarpayRes] = await Promise.allSettled([
       abanTetherSources.length > 0
         ? fetchAbanTetherMarkets()
         : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
-      needsTgjuUsdToman ? fetchTgjuUsdToman() : Promise.resolve(0),
       zarpaySources.length > 0 ? fetchZarpayCoins() : Promise.resolve([] as ZarpayCoinRow[]),
     ]);
     const abanTetherMarkets =
       abanTetherRes.status === 'fulfilled' ? abanTetherRes.value : {};
-    const tgjuUsdToman = tgjuRes.status === 'fulfilled' ? tgjuRes.value : 0;
     const zarpayMarket = zarpayRes.status === 'fulfilled' ? zarpayRes.value : [];
 
     if (abanTetherRes.status === 'rejected') {
       console.warn('price quote refresh warning: abantether failed', abanTetherRes.reason);
-    }
-    if (tgjuRes.status === 'rejected') {
-      console.warn('price quote refresh warning: tgju failed', tgjuRes.reason);
     }
     if (zarpayRes.status === 'rejected') {
       console.warn('price quote refresh warning: zarpay failed', zarpayRes.reason);
@@ -292,13 +365,11 @@ export async function POST(request: Request) {
 
     const quotes = sources
       .map((source) =>
-        source.provider === 'app'
-          ? toAppDollarQuote(source, tgjuUsdToman)
+        source.slug === APP_GLOBAL_USD_SLUG
+          ? toAppDollarQuote(source, abanTetherMarkets)
           : source.provider === 'abantether'
             ? toAbanTetherQuote(source, abanTetherMarkets)
-            : source.provider === 'tgju'
-              ? toTgjuQuote(source, tgjuUsdToman)
-              : toZarpayQuote(source, zarpayMarket)
+            : toZarpayQuote(source, zarpayMarket)
       )
       .filter((quote): quote is ProviderQuote => !!quote);
 

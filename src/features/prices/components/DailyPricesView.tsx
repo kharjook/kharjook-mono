@@ -15,6 +15,7 @@ import {
 } from '@/features/prices/utils/provider-refresh';
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
+const USD_RATE_SOURCE_SLUG = 'abantether.usdt';
 
 const toTomanInput = (value: number): string => {
   if (!Number.isFinite(value) || value <= 0) return '';
@@ -66,14 +67,14 @@ export function DailyPricesView() {
 
   const applyProviderQuotes = async () => {
     const slugs = [
-      'tgju.usd',
+      USD_RATE_SOURCE_SLUG,
       ...refreshableAssets
         .map((asset) => asset.price_source_id)
         .filter((slug): slug is string => !!slug),
     ];
 
     const quotesRaw = await fetchProviderQuotes(slugs);
-    const usdQuoteFromFetch = quotesRaw.find((quote) => quote.slug === 'tgju.usd');
+    const usdQuoteFromFetch = quotesRaw.find((quote) => quote.slug === USD_RATE_SOURCE_SLUG);
     const nextUsdRate =
       usdQuoteFromFetch && usdQuoteFromFetch.priceToman > 0
         ? usdQuoteFromFetch.priceToman
@@ -110,7 +111,7 @@ export function DailyPricesView() {
       return next;
     });
 
-    return quotes.filter((quote) => quote.slug !== 'tgju.usd').length;
+    return quotes.filter((quote) => quote.slug !== USD_RATE_SOURCE_SLUG).length;
   };
 
   const handleRefreshProviders = async (silent = false) => {

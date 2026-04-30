@@ -62,8 +62,7 @@ export function mergeCurrencyRates(
 
 /**
  * Ensures a quote for {@link APP_GLOBAL_USD_SLUG} exists whenever any asset uses
- * it, using the same canonical USD/Toman rate as the rest of the app (TGJU when
- * available, otherwise the caller’s fallback).
+ * it, using the same canonical USD/Toman rate as the rest of the app.
  */
 export function mergeGlobalUsdDollarQuotes(
   quotes: ProviderQuote[],
