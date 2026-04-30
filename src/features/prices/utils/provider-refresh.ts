@@ -1,7 +1,10 @@
 'use client';
 
 import { supabase } from '@/shared/lib/supabase/client';
-import { APP_GLOBAL_USD_SLUG } from '@/features/prices/constants/price-sources';
+import {
+  APP_GLOBAL_USD_SLUG,
+  findPriceSource,
+} from '@/features/prices/constants/price-sources';
 import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
 import type {
   Asset,
@@ -29,6 +32,171 @@ export interface ProviderQuoteFetchResult {
   failedProviders: Array<{ provider: string; error: string }>;
   unresolvedSlugs: Array<{ slug: string; reason: string }>;
   unknownRequestedSlugs: string[];
+}
+
+type AbanMarketRow = {
+  symbol?: string;
+  coin_symbol?: string;
+  base_symbol?: string;
+  buy?: number | string;
+  sell?: number | string;
+  buy_price?: number | string;
+  sell_price?: number | string;
+  price?: number | string;
+  [key: string]: unknown;
+};
+
+function parseAbanCoins(payload: unknown): AbanMarketRow[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const root = payload as Record<string, unknown>;
+  const directCandidates = [root.data, root.payload, root.result, root.coins, root.items];
+  for (const c of directCandidates) {
+    if (Array.isArray(c)) return c as AbanMarketRow[];
+    if (c && typeof c === 'object') {
+      const nested = c as Record<string, unknown>;
+      const arrCandidates = [nested.coins, nested.items, nested.list, nested.data];
+      for (const arr of arrCandidates) {
+        if (Array.isArray(arr)) return arr as AbanMarketRow[];
+      }
+      const mapCandidates = [nested.symbols, nested.markets, nested.tickers];
+      for (const map of mapCandidates) {
+        if (map && typeof map === 'object' && !Array.isArray(map)) {
+          return Object.values(map as Record<string, unknown>).filter(
+            (v): v is AbanMarketRow => !!v && typeof v === 'object'
+          );
+        }
+      }
+    }
+  }
+  return [];
+}
+
+function toNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function fetchAbanQuotesClient(
+  abanSlugs: string[]
+): Promise<{
+  quotes: ProviderQuote[];
+  failedProviders: Array<{ provider: string; error: string }>;
+  unresolvedSlugs: Array<{ slug: string; reason: string }>;
+}> {
+  if (abanSlugs.length === 0) {
+    return { quotes: [], failedProviders: [], unresolvedSlugs: [] };
+  }
+  if (typeof window === 'undefined' || typeof WebSocket === 'undefined') {
+    return {
+      quotes: [],
+      failedProviders: [{ provider: 'abantether', error: 'WebSocket unavailable in this runtime' }],
+      unresolvedSlugs: abanSlugs.map((slug) => ({ slug, reason: 'AbanTether websocket unavailable' })),
+    };
+  }
+
+  const markets = await new Promise<Record<string, { sell: number; buy: number }>>((resolve, reject) => {
+    const ws = new WebSocket('wss://ws.abantether.com/public');
+    let done = false;
+    let seenFrames = 0;
+    const maxFrames = 20;
+    const timer = window.setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { ws.close(); } catch {}
+      reject(new Error('AbanTether websocket timeout'));
+    }, 20000);
+    const fail = (error: unknown) => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      try { ws.close(); } catch {}
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const succeed = (data: Record<string, { sell: number; buy: number }>) => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      try { ws.close(); } catch {}
+      resolve(data);
+    };
+    ws.onerror = () => fail(new Error('AbanTether websocket error'));
+    ws.onclose = () => {
+      if (!done) fail(new Error('AbanTether websocket closed before payload'));
+    };
+    ws.onopen = () => {
+      const packets = [
+        { action: 'subscribe', channel: 'coins_list_v2' },
+        { action: 'subscribe', channel: 'coin_list_v2' },
+        { event: 'subscribe', channel: 'coins_list_v2' },
+        { event: 'subscribe', channel: 'coin_list_v2' },
+        { op: 'subscribe', channel: 'coins_list_v2' },
+        { op: 'subscribe', channel: 'coin_list_v2' },
+        { action: 'subscribe', channels: ['coins_list_v2'] },
+        { action: 'subscribe', channels: ['coin_list_v2'] },
+        { channel: 'coins_list_v2' },
+        { channel: 'coin_list_v2' },
+      ];
+      for (const packet of packets) ws.send(JSON.stringify(packet));
+      // Some gateways stay silent unless heartbeat is seen.
+      const heartbeats = [{ action: 'ping' }, { event: 'ping' }, { op: 'ping' }];
+      for (const hb of heartbeats) ws.send(JSON.stringify(hb));
+    };
+    ws.onmessage = (event) => {
+      seenFrames += 1;
+      try {
+        const raw = JSON.parse(String(event.data ?? '')) as unknown;
+        const coins = parseAbanCoins(raw);
+        if (coins.length === 0) {
+          if (seenFrames >= maxFrames) fail(new Error('AbanTether websocket did not deliver coins payload'));
+          return;
+        }
+        const parsed: Record<string, { sell: number; buy: number }> = {};
+        for (const coin of coins) {
+          const symbol = String(coin.symbol ?? coin.coin_symbol ?? coin.base_symbol ?? '').toUpperCase();
+          if (!symbol) continue;
+          const sell = toNumber(coin.sell_price ?? coin.sell ?? coin.price);
+          const buy = toNumber(coin.buy_price ?? coin.buy ?? coin.price);
+          if (!(sell > 0) && !(buy > 0)) continue;
+          parsed[`${symbol}IRT`] = { sell: sell > 0 ? sell : buy, buy: buy > 0 ? buy : sell };
+        }
+        if (Object.keys(parsed).length === 0) {
+          if (seenFrames >= maxFrames) fail(new Error('AbanTether websocket payload had no usable prices'));
+          return;
+        }
+        succeed(parsed);
+      } catch (error) {
+        fail(error);
+      }
+    };
+  });
+
+  const quotes: ProviderQuote[] = [];
+  const unresolvedSlugs: Array<{ slug: string; reason: string }> = [];
+  for (const slug of abanSlugs) {
+    const source = findPriceSource(slug);
+    if (!source) {
+      unresolvedSlugs.push({ slug, reason: 'Unknown source slug' });
+      continue;
+    }
+    const key = slug === APP_GLOBAL_USD_SLUG ? 'USDTIRT' : `${source.fetchKey ?? ''}IRT`;
+    const row = markets[key];
+    if (!row) {
+      unresolvedSlugs.push({ slug, reason: `No ${key} quote in websocket payload` });
+      continue;
+    }
+    const priceToman = row.sell > 0 ? row.sell : row.buy;
+    if (!(priceToman > 0)) {
+      unresolvedSlugs.push({ slug, reason: `Invalid ${key} quote value` });
+      continue;
+    }
+    quotes.push({
+      slug,
+      provider: source.provider,
+      priceToman,
+      fetchedAt: new Date().toISOString(),
+    });
+  }
+  return { quotes, failedProviders: [], unresolvedSlugs };
 }
 
 interface PersistProviderQuotesInput {
@@ -109,6 +277,28 @@ export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<Prov
     };
   }
 
+  const unknownRequestedSlugs = uniqueSlugs.filter((slug) => !findPriceSource(slug));
+  const knownSlugs = uniqueSlugs.filter((slug) => !!findPriceSource(slug));
+  const abanSlugs = knownSlugs.filter((slug) => findPriceSource(slug)?.provider === 'abantether' || slug === APP_GLOBAL_USD_SLUG);
+  const nonAbanSlugs = knownSlugs.filter((slug) => !abanSlugs.includes(slug));
+
+  const abanResult = await fetchAbanQuotesClient(abanSlugs).catch((error) => ({
+    quotes: [] as ProviderQuote[],
+    failedProviders: [
+      { provider: 'abantether', error: error instanceof Error ? error.message : String(error) },
+    ],
+    unresolvedSlugs: abanSlugs.map((slug) => ({ slug, reason: 'AbanTether websocket unavailable' })),
+  }));
+
+  if (nonAbanSlugs.length === 0) {
+    return {
+      quotes: abanResult.quotes,
+      failedProviders: abanResult.failedProviders,
+      unresolvedSlugs: abanResult.unresolvedSlugs,
+      unknownRequestedSlugs,
+    };
+  }
+
   const response = await fetch('/api/prices/quotes', {
     method: 'POST',
     headers: {
@@ -116,7 +306,7 @@ export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<Prov
     },
     credentials: 'omit',
     cache: 'no-store',
-    body: JSON.stringify({ slugs: uniqueSlugs }),
+    body: JSON.stringify({ slugs: nonAbanSlugs }),
   });
 
   const raw = await response.text();
@@ -127,10 +317,19 @@ export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<Prov
 
   const payload = JSON.parse(raw) as FetchProviderQuotesResponse;
   return {
-    quotes: Array.isArray(payload.quotes) ? payload.quotes : [],
-    failedProviders: Array.isArray(payload.failedProviders) ? payload.failedProviders : [],
-    unresolvedSlugs: Array.isArray(payload.unresolvedSlugs) ? payload.unresolvedSlugs : [],
-    unknownRequestedSlugs: Array.isArray(payload.unknownRequestedSlugs) ? payload.unknownRequestedSlugs : [],
+    quotes: [...abanResult.quotes, ...(Array.isArray(payload.quotes) ? payload.quotes : [])],
+    failedProviders: [
+      ...abanResult.failedProviders,
+      ...(Array.isArray(payload.failedProviders) ? payload.failedProviders : []),
+    ],
+    unresolvedSlugs: [
+      ...abanResult.unresolvedSlugs,
+      ...(Array.isArray(payload.unresolvedSlugs) ? payload.unresolvedSlugs : []),
+    ],
+    unknownRequestedSlugs: [
+      ...unknownRequestedSlugs,
+      ...(Array.isArray(payload.unknownRequestedSlugs) ? payload.unknownRequestedSlugs : []),
+    ],
   };
 }
 

@@ -165,9 +165,10 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
       close();
       resolve(markets);
     };
-    const timer = setTimeout(() => fail(new Error('AbanTether websocket timeout')), 12_000);
-    const maxFrames = 8;
+    const timer = setTimeout(() => fail(new Error('AbanTether websocket timeout')), 20_000);
+    const maxFrames = 20;
     let seenFrames = 0;
+    const frameSamples: string[] = [];
     ws.onerror = (event) => {
       clearTimeout(timer);
       fail(new Error(`AbanTether websocket error: ${String(event.type)}`));
@@ -179,24 +180,32 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
       }
     };
     ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          action: 'subscribe',
-          channel: 'coins_list_v2',
-        })
-      );
+      // Some WS gateways accept different subscribe envelopes.
+      const packets = [
+        { action: 'subscribe', channel: 'coins_list_v2' },
+        { event: 'subscribe', channel: 'coins_list_v2' },
+        { op: 'subscribe', channel: 'coins_list_v2' },
+        { action: 'subscribe', channels: ['coins_list_v2'] },
+      ];
+      for (const packet of packets) {
+        ws.send(JSON.stringify(packet));
+      }
     };
     ws.onmessage = (event) => {
       seenFrames += 1;
       try {
-        const raw = JSON.parse(String(event.data)) as unknown;
+        const rawText = String(event.data ?? '');
+        if (frameSamples.length < 4) frameSamples.push(rawText.slice(0, 300));
+        const raw = JSON.parse(rawText) as unknown;
         const coins = extractAbanCoins(raw);
         if (coins.length === 0) {
           // First frame is often an ack/heartbeat; ignore and keep waiting for
           // the first payload that actually carries coin rows.
           if (seenFrames >= maxFrames) {
             clearTimeout(timer);
-            throw new Error('AbanTether websocket did not deliver coins payload');
+            throw new Error(
+              `AbanTether websocket did not deliver coins payload. samples=${frameSamples.join(' || ')}`
+            );
           }
           return;
         }
@@ -217,7 +226,9 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
         if (Object.keys(markets).length === 0) {
           if (seenFrames >= maxFrames) {
             clearTimeout(timer);
-            throw new Error('AbanTether websocket payload had no usable prices');
+            throw new Error(
+              `AbanTether websocket payload had no usable prices. samples=${frameSamples.join(' || ')}`
+            );
           }
           return;
         }
@@ -248,6 +259,23 @@ function extractAbanCoins(payload: unknown): AbanSocketCoinRow[] {
       for (const arr of arrCandidates) {
         if (Array.isArray(arr)) return arr as AbanSocketCoinRow[];
       }
+      const mapCandidates = [nested.symbols, nested.markets, nested.tickers];
+      for (const map of mapCandidates) {
+        if (map && typeof map === 'object' && !Array.isArray(map)) {
+          return Object.values(map as Record<string, unknown>).filter(
+            (v): v is AbanSocketCoinRow => !!v && typeof v === 'object'
+          );
+        }
+      }
+    }
+  }
+  // Root-level maps
+  const rootMaps = [root.symbols, root.markets, root.tickers];
+  for (const map of rootMaps) {
+    if (map && typeof map === 'object' && !Array.isArray(map)) {
+      return Object.values(map as Record<string, unknown>).filter(
+        (v): v is AbanSocketCoinRow => !!v && typeof v === 'object'
+      );
     }
   }
   return [];
