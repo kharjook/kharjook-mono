@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
@@ -9,6 +9,7 @@ import { supabase } from '@/shared/lib/supabase/client';
 import type { CurrencyRate, DailyPrice } from '@/shared/types/domain';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
+import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import {
   fetchProviderQuotes,
   mergeGlobalUsdDollarQuotes,
@@ -31,7 +32,7 @@ export function DailyPricesView() {
   const router = useRouter();
   const toast = useToast();
   const { user } = useAuth();
-  const { assets, setAssets, setCurrencyRates, setDailyPrices } = useData();
+  const { assets, transactions, setAssets, setCurrencyRates, setDailyPrices } = useData();
   const { usdRate } = useUI();
 
   const [isSaving, setIsSaving] = useState(false);
@@ -64,6 +65,15 @@ export function DailyPricesView() {
     Number.isFinite(currentUsdNum) && currentUsdNum > 0 ? currentUsdNum : 0;
 
   const refreshableAssets = assets.filter((asset) => !!asset.price_source_id);
+  const visibleAssets = useMemo(
+    () =>
+      assets.filter((asset) => {
+        if (asset.include_in_balance === false) return false;
+        const stats = calculateAssetStats(asset, transactions, 'TOMAN', usdRate);
+        return stats.totalAmount > 0;
+      }),
+    [assets, transactions, usdRate]
+  );
 
   const applyProviderQuotes = async () => {
     const slugs = [
@@ -339,7 +349,7 @@ export function DailyPricesView() {
         </div>
 
         <div className="space-y-4">
-          {assets.map((asset) => (
+          {visibleAssets.map((asset) => (
             <div
               key={asset.id}
               className="bg-[#1A1B26] p-4 rounded-2xl border border-white/5 space-y-4"
@@ -381,6 +391,11 @@ export function DailyPricesView() {
               </div>
             </div>
           ))}
+          {visibleAssets.length === 0 && (
+            <div className="bg-[#1A1B26] p-6 rounded-2xl border border-white/5 text-center text-slate-500 text-sm">
+              دارایی با مقدار بیشتر از صفر برای بروزرسانی قیمت وجود ندارد.
+            </div>
+          )}
         </div>
       </div>
 
