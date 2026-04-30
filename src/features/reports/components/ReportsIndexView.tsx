@@ -18,6 +18,7 @@ import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import type { CurrencyMode } from '@/shared/types/domain';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import {
+  clampPeriodToToday,
   currentPeriod,
   encodePeriodParams,
   formatCurrentPeriodLabel,
@@ -37,7 +38,7 @@ export function ReportsIndexView() {
 
   const cashflowByPeriod = useMemo(() => {
     return PERIOD_KINDS.map((kind) => {
-      const period = currentPeriod(kind);
+      const period = clampPeriodToToday(currentPeriod(kind));
       const income = rollupCategories({
         transactions, categories, wallets,
         period, kind: 'income', walletId: null, currencyMode,
@@ -52,7 +53,7 @@ export function ReportsIndexView() {
 
   const assetsByPeriod = useMemo(() => {
     return PERIOD_KINDS.map((kind) => {
-      const period = currentPeriod(kind);
+      const period = clampPeriodToToday(currentPeriod(kind));
       const periodEndStr = formatJalaali(period.end);
       let realizedToman = 0;
       let realizedUsd = 0;
@@ -194,7 +195,7 @@ function CashflowPeriodCard({
   expense: number;
   currencyMode: CurrencyMode;
 }) {
-  const { period, d } = encodePeriodParams(currentPeriod(kind));
+  const { period, d } = encodePeriodParams(clampPeriodToToday(currentPeriod(kind)));
   const href = `/reports/cashflow?period=${period}&d=${d}`;
   const net = income - expense;
 
@@ -254,7 +255,7 @@ function AssetsPeriodCard({
   sellCount: number;
   currencyMode: CurrencyMode;
 }) {
-  const { period, d } = encodePeriodParams(currentPeriod(kind));
+  const { period, d } = encodePeriodParams(clampPeriodToToday(currentPeriod(kind)));
   const href = `/reports/assets?period=${period}&d=${d}`;
   // Primary / secondary values swap with the global toggle so the card's
   // dominant line matches the active currency.

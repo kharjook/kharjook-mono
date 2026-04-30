@@ -109,6 +109,12 @@ export function isCurrentPeriod(p: Period): boolean {
   return cmpJalaali(today, p.start) >= 0 && cmpJalaali(today, p.end) <= 0;
 }
 
+/** Clamp period end to today (useful for "current month/year to date"). */
+export function clampPeriodToToday(p: Period): Period {
+  const today = todayJalaali();
+  return cmpJalaali(p.end, today) > 0 ? { ...p, end: today } : p;
+}
+
 /** Pure string check — safely handles Persian digits, `-` vs `/`, padding. */
 export function isInPeriod(dateString: string, p: Period): boolean {
   const parsed = parseJalaali(dateString);

@@ -18,6 +18,7 @@ import { EntityIcon } from '@/shared/components/EntityIcon';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import { assetDecimals, formatAssetAmount } from '@/shared/utils/format-asset-amount';
 import {
+  clampPeriodToToday,
   decodePeriodParams,
   encodePeriodParams,
   formatPeriodLabel,
@@ -45,7 +46,7 @@ export function AssetsReportView() {
   const { usdRate, currencyMode } = useUI();
 
   const period = useMemo(
-    () => decodePeriodParams(searchParams.get('period'), searchParams.get('d')),
+    () => clampPeriodToToday(decodePeriodParams(searchParams.get('period'), searchParams.get('d'))),
     [searchParams]
   );
   const assetFilter = searchParams.get('asset') || null;
@@ -123,6 +124,8 @@ export function AssetsReportView() {
     let unrealizedToman = 0;
     let unrealizedUsd = 0;
     let unrealizedMissingCount = 0;
+    let invalidTradeCount = 0;
+    let oversellCount = 0;
     let buyCount = 0;
     let sellCount = 0;
     for (const { stats } of visible) {
@@ -134,6 +137,8 @@ export function AssetsReportView() {
       } else {
         unrealizedMissingCount += 1;
       }
+      invalidTradeCount += stats.invalidTradeCount;
+      oversellCount += stats.oversellCount;
       buyCount += stats.bought.count;
       sellCount += stats.sold.count;
     }
@@ -143,6 +148,8 @@ export function AssetsReportView() {
       unrealizedToman,
       unrealizedUsd,
       unrealizedMissingCount,
+      invalidTradeCount,
+      oversellCount,
       buyCount,
       sellCount,
     };
@@ -186,6 +193,8 @@ export function AssetsReportView() {
           unrealizedToman={totals.unrealizedToman}
           unrealizedUsd={totals.unrealizedUsd}
           unrealizedMissingCount={totals.unrealizedMissingCount}
+          invalidTradeCount={totals.invalidTradeCount}
+          oversellCount={totals.oversellCount}
           buyCount={totals.buyCount}
           sellCount={totals.sellCount}
           periodEndLabel={periodEndLabel}
@@ -211,6 +220,18 @@ export function AssetsReportView() {
             قیمت پایان دوره در دسترس نیست؛ سود/زیان باز آن‌ها در جمع لحاظ
             نشده. با ثبت قیمت روزانه یا تراکنش در آن روز، تاریخچه ساخته می‌شود.
           </p>
+        )}
+        {(totals.invalidTradeCount > 0 || totals.oversellCount > 0) && (
+          <div className="flex items-start gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2.5">
+            <AlertCircle size={14} className="text-rose-300 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-rose-200 leading-relaxed">
+              {totals.invalidTradeCount > 0 &&
+                `${totals.invalidTradeCount.toLocaleString('fa-IR')} رکورد دارایی نامعتبر از محاسبه حذف شد.`}
+              {totals.invalidTradeCount > 0 && totals.oversellCount > 0 && ' '}
+              {totals.oversellCount > 0 &&
+                `${totals.oversellCount.toLocaleString('fa-IR')} مورد فروش بیشتر از موجودی تشخیص داده شد.`}
+            </p>
+          </div>
         )}
       </main>
     </div>
@@ -266,6 +287,8 @@ function SummaryCard({
   unrealizedToman,
   unrealizedUsd,
   unrealizedMissingCount,
+  invalidTradeCount,
+  oversellCount,
   buyCount,
   sellCount,
   periodEndLabel,
@@ -278,6 +301,8 @@ function SummaryCard({
   unrealizedToman: number;
   unrealizedUsd: number;
   unrealizedMissingCount: number;
+  invalidTradeCount: number;
+  oversellCount: number;
   buyCount: number;
   sellCount: number;
   periodEndLabel: string;
@@ -327,6 +352,18 @@ function SummaryCard({
         warn={unrealizedMissingCount > 0}
         currencyMode={currencyMode}
       />
+      {(invalidTradeCount > 0 || oversellCount > 0) && (
+        <>
+          <div className="border-t border-white/5" />
+          <div className="text-[10px] text-rose-300/90">
+            {invalidTradeCount > 0 &&
+              `${invalidTradeCount.toLocaleString('fa-IR')} رکورد نامعتبر`}
+            {invalidTradeCount > 0 && oversellCount > 0 && ' · '}
+            {oversellCount > 0 &&
+              `${oversellCount.toLocaleString('fa-IR')} فروش بیشتر از موجودی`}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -497,6 +534,15 @@ function AssetRow({
       ) : (
         <div className="text-[11px] text-slate-500 bg-white/2 border border-white/5 rounded-lg px-3 py-2">
           در این دوره تراکنشی ثبت نشده.
+        </div>
+      )}
+      {(stats.invalidTradeCount > 0 || stats.oversellCount > 0) && (
+        <div className="text-[10px] text-rose-300/90 bg-rose-500/8 border border-rose-500/20 rounded-lg px-2 py-1.5">
+          {stats.invalidTradeCount > 0 &&
+            `${stats.invalidTradeCount.toLocaleString('fa-IR')} رکورد نامعتبر`}
+          {stats.invalidTradeCount > 0 && stats.oversellCount > 0 && ' · '}
+          {stats.oversellCount > 0 &&
+            `${stats.oversellCount.toLocaleString('fa-IR')} فروش بیش از موجودی`}
         </div>
       )}
 

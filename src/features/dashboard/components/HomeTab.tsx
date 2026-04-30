@@ -16,7 +16,7 @@ import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { formatCurrency } from '@/shared/utils/format-currency';
-import { currentPeriod } from '@/shared/utils/period';
+import { clampPeriodToToday, currentPeriod } from '@/shared/utils/period';
 import { formatJalaali, formatJalaaliHuman, parseJalaali, todayJalaali } from '@/shared/utils/jalali';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
 import { effectivePriceAt } from '@/features/reports/utils/price-history';
@@ -74,12 +74,14 @@ export function HomeTab() {
 
   const today = todayJalaali();
   const todayStr = formatJalaali(today);
-  const monthPeriod = currentPeriod('month');
-  const yearPeriod = currentPeriod('year');
+  const monthPeriod = clampPeriodToToday(currentPeriod('month'));
+  const yearPeriod = clampPeriodToToday(currentPeriod('year'));
 
   const stats = useMemo(() => {
     let assetsValueToman = 0;
     let yearProfitToman = 0;
+    let yearProfitUsd = 0;
+    let yearUnrealizedMissingCount = 0;
     let monthIncomeToman = 0;
     let monthExpenseToman = 0;
     const monthExpenseByCategory = new Map<string, number>();
@@ -163,8 +165,12 @@ export function HomeTab() {
         periodEndPrice
       );
       yearProfitToman += periodStats.realizedToman;
+      yearProfitUsd += periodStats.realizedUsd;
       if (periodStats.unrealizedAvailable) {
         yearProfitToman += periodStats.unrealizedToman;
+        yearProfitUsd += periodStats.unrealizedUsd;
+      } else {
+        yearUnrealizedMissingCount += 1;
       }
     }
 
@@ -198,6 +204,8 @@ export function HomeTab() {
       totalPortfolioToman,
       cashToman,
       yearProfitToman,
+      yearProfitUsd,
+      yearUnrealizedMissingCount,
       monthIncomeToman,
       monthExpenseToman,
       monthBalanceToman: monthIncomeToman - monthExpenseToman,
@@ -235,7 +243,7 @@ export function HomeTab() {
       : stats.cashToman;
   const displayYearProfit =
     currencyMode === 'USD'
-      ? (usdRate > 0 ? stats.yearProfitToman / usdRate : 0)
+      ? stats.yearProfitUsd
       : stats.yearProfitToman;
   const displayMonthIncome =
     currencyMode === 'USD' && usdRate > 0
@@ -397,6 +405,11 @@ export function HomeTab() {
             {displayYearProfit >= 0 ? '+' : ''}
             {formatCurrency(displayYearProfit, currencyMode)}
           </p>
+          {stats.yearUnrealizedMissingCount > 0 && (
+            <p className="text-[10px] text-amber-400/80 mt-1">
+              {stats.yearUnrealizedMissingCount.toLocaleString('fa-IR')} دارایی بدون قیمت تاریخی؛ عدد کل ناقص است.
+            </p>
+          )}
         </div>
       </div>
     </div>

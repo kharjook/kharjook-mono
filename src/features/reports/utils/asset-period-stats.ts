@@ -80,6 +80,10 @@ export interface AssetPeriodStats {
   periodEndPriceSourceDate: string | null;
   periodEndPriceIsLive: boolean;
   hadActivity: boolean;
+  /** Asset-touching rows skipped because price/amount/rate was invalid. */
+  invalidTradeCount: number;
+  /** Number of sells/asset-expenses that exceeded available holdings. */
+  oversellCount: number;
 }
 
 function emptySide(): SideAggregate {
@@ -118,6 +122,8 @@ export function emptyAssetPeriodStats(assetId: string): AssetPeriodStats {
     periodEndPriceSourceDate: null,
     periodEndPriceIsLive: false,
     hadActivity: false,
+    invalidTradeCount: 0,
+    oversellCount: 0,
   };
 }
 
@@ -254,7 +260,10 @@ export function calculateAssetPeriodStats(
 
   for (const tx of sorted) {
     const trade = readTrade(tx, usdRateFallback);
-    if (!trade) continue;
+    if (!trade) {
+      stats.invalidTradeCount += 1;
+      continue;
+    }
     const { amount, priceToman, priceUsd } = trade;
 
     // Snapshot end-of-period state the moment we step past the period.
@@ -285,6 +294,7 @@ export function calculateAssetPeriodStats(
       const avgT = units > 0 ? costToman / units : 0;
       const avgU = units > 0 ? costUsd / units : 0;
       const drain = Math.min(amount, units);
+      if (amount > units + 1e-6) stats.oversellCount += 1;
 
       if (inPeriod) {
         stats.realizedToman += drain * (priceToman - avgT);

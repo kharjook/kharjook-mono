@@ -15,6 +15,7 @@ import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import type { CurrencyMode } from '@/shared/types/domain';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import {
+  clampPeriodToToday,
   decodePeriodParams,
   encodePeriodParams,
   type Period,
@@ -36,7 +37,7 @@ export function CashflowReportView() {
   const { currencyMode } = useUI();
 
   const period = useMemo(
-    () => decodePeriodParams(searchParams.get('period'), searchParams.get('d')),
+    () => clampPeriodToToday(decodePeriodParams(searchParams.get('period'), searchParams.get('d'))),
     [searchParams]
   );
   const tab: Tab = (searchParams.get('tab') === 'income' ? 'income' : 'expense');
