@@ -11,7 +11,7 @@ import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider'
 import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import {
-  fetchProviderQuotes,
+  fetchProviderQuotesDetailed,
   mergeGlobalUsdDollarQuotes,
 } from '@/features/prices/utils/provider-refresh';
 
@@ -83,7 +83,8 @@ export function DailyPricesView() {
         .filter((slug): slug is string => !!slug),
     ];
 
-    const quotesRaw = await fetchProviderQuotes(slugs);
+    const result = await fetchProviderQuotesDetailed(slugs);
+    const quotesRaw = result.quotes;
     const usdQuoteFromFetch = quotesRaw.find((quote) => quote.slug === USD_RATE_SOURCE_SLUG);
     const nextUsdRate =
       usdQuoteFromFetch && usdQuoteFromFetch.priceToman > 0
@@ -95,7 +96,14 @@ export function DailyPricesView() {
       refreshableAssets,
       nextUsdRate
     );
-    if (quotes.length === 0) return 0;
+    if (quotes.length === 0) {
+      return {
+        updatedAssetCount: 0,
+        failedProviders: result.failedProviders,
+        unresolvedSlugs: result.unresolvedSlugs,
+        unknownRequestedSlugs: result.unknownRequestedSlugs,
+      };
+    }
 
     const quoteBySlug = new Map(quotes.map((quote) => [quote.slug, quote]));
 
@@ -121,18 +129,36 @@ export function DailyPricesView() {
       return next;
     });
 
-    return quotes.filter((quote) => quote.slug !== USD_RATE_SOURCE_SLUG).length;
+    return {
+      updatedAssetCount: quotes.filter((quote) => quote.slug !== USD_RATE_SOURCE_SLUG).length,
+      failedProviders: result.failedProviders,
+      unresolvedSlugs: result.unresolvedSlugs,
+      unknownRequestedSlugs: result.unknownRequestedSlugs,
+    };
   };
 
   const handleRefreshProviders = async (silent = false) => {
     setIsRefreshingProviders(true);
     try {
-      const updated = await applyProviderQuotes();
+      const refresh = await applyProviderQuotes();
       if (!silent) {
-        if (updated > 0) {
-          toast.success(`${updated} قیمت دارایی و نرخ دلار بروزرسانی شد.`);
+        if (refresh.updatedAssetCount > 0) {
+          toast.success(`${refresh.updatedAssetCount} قیمت دارایی و نرخ دلار بروزرسانی شد.`);
         } else {
-          toast.success('نرخ دلار بروزرسانی شد.');
+          toast.info('قیمت معتبری برای بروزرسانی دریافت نشد.');
+        }
+        if (refresh.failedProviders.length > 0 || refresh.unresolvedSlugs.length > 0 || refresh.unknownRequestedSlugs.length > 0) {
+          const providerMsg = refresh.failedProviders
+            .map((p) => `${p.provider}: ${p.error}`)
+            .join(' | ');
+          const unresolvedMsg = refresh.unresolvedSlugs
+            .map((u) => `${u.slug}: ${u.reason}`)
+            .join(' | ');
+          const unknownMsg = refresh.unknownRequestedSlugs.join(', ');
+          const detail = [providerMsg, unresolvedMsg, unknownMsg ? `unknown: ${unknownMsg}` : '']
+            .filter(Boolean)
+            .join(' | ');
+          toast.error(`بخشی از بروزرسانی انجام نشد. ${detail}`, { duration: 10000 });
         }
       }
     } catch (error) {

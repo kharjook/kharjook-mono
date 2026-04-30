@@ -231,102 +231,6 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
   });
 }
 
-async function fetchAbanTetherMarketsRest(): Promise<Record<string, AbanTetherMarketRow>> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  try {
-    const response = await fetch('https://api.abantether.com/api/v1/manager/otc/ticker', {
-      method: 'GET',
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        'user-agent': USER_AGENT,
-        accept: 'application/json',
-      },
-    });
-    const text = await response.text();
-    const parsed = JSON.parse(text) as unknown;
-    const markets = extractAbanMarketsFromRestPayload(parsed);
-    if (Object.keys(markets).length > 0) return markets;
-    throw new Error(
-      `AbanTether REST ticker has no parseable markets (status=${response.status})`
-    );
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function fetchAbanTetherMarketsWithFallback(): Promise<Record<string, AbanTetherMarketRow>> {
-  try {
-    return await fetchAbanTetherMarkets();
-  } catch (wsError) {
-    console.warn('AbanTether websocket failed, falling back to REST ticker', wsError);
-    return fetchAbanTetherMarketsRest();
-  }
-}
-
-function extractAbanMarketsFromRestPayload(
-  payload: unknown
-): Record<string, AbanTetherMarketRow> {
-  if (!payload || typeof payload !== 'object') return {};
-  const root = payload as Record<string, unknown>;
-
-  // Legacy/expected structure
-  const oldMarkets = (root.data as { markets?: unknown } | undefined)?.markets;
-  if (oldMarkets && typeof oldMarkets === 'object') {
-    return oldMarkets as Record<string, AbanTetherMarketRow>;
-  }
-
-  // Alternative structures seen in Aban API variants
-  const directSymbols = root.symbols;
-  const nestedSymbols = (root.data as { symbols?: unknown } | undefined)?.symbols;
-  const symbols = (nestedSymbols ?? directSymbols) as Record<string, unknown> | undefined;
-  if (symbols && typeof symbols === 'object') {
-    const out: Record<string, AbanTetherMarketRow> = {};
-    for (const [pair, row] of Object.entries(symbols)) {
-      if (!row || typeof row !== 'object') continue;
-      const rec = row as Record<string, unknown>;
-      const sell = toNumber(rec.sell_price ?? rec.sell ?? rec.price);
-      const buy = toNumber(rec.buy_price ?? rec.buy ?? rec.price);
-      if (!(sell > 0) && !(buy > 0)) continue;
-      out[pair] = {
-        symbol: String(rec.symbol ?? pair),
-        sell_price: String(sell > 0 ? sell : buy),
-        buy_price: String(buy > 0 ? buy : sell),
-      };
-    }
-    if (Object.keys(out).length > 0) return out;
-  }
-
-  // New 422 payload still includes usable rows under error details `data[*].input`.
-  const details = root.data;
-  if (Array.isArray(details)) {
-    const out: Record<string, AbanTetherMarketRow> = {};
-    for (const detail of details) {
-      if (!detail || typeof detail !== 'object') continue;
-      const rec = detail as Record<string, unknown>;
-      const loc = rec.loc;
-      const input = rec.input;
-      if (!Array.isArray(loc) || loc.length < 2) continue;
-      if (loc[0] !== 'symbols') continue;
-      if (!input || typeof input !== 'object') continue;
-      const pair = String(loc[1]);
-      const row = input as Record<string, unknown>;
-      const sell = toNumber(row.sell_price ?? row.sell ?? row.price);
-      const buy = toNumber(row.buy_price ?? row.buy ?? row.price);
-      if (!(sell > 0) && !(buy > 0)) continue;
-      out[pair] = {
-        symbol: String(row.symbol ?? pair),
-        sell_price: String(sell > 0 ? sell : buy),
-        buy_price: String(buy > 0 ? buy : sell),
-      };
-    }
-    if (Object.keys(out).length > 0) return out;
-  }
-
-  return {};
-}
-
 function toNumber(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -435,6 +339,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const unknownRequestedSlugs = Array.from(
+      new Set(requestedSlugs.filter((slug) => !findPriceSource(slug)))
+    );
+
     const sources = Array.from(
       new Map(
         requestedSlugs
@@ -458,7 +366,7 @@ export async function POST(request: Request) {
     // Provider outages should degrade partially, not take down the whole API.
     const [abanTetherRes, zarpayRes] = await Promise.allSettled([
       abanTetherSources.length > 0
-        ? fetchAbanTetherMarketsWithFallback()
+        ? fetchAbanTetherMarkets()
         : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
       zarpaySources.length > 0 ? fetchZarpayCoins() : Promise.resolve([] as ZarpayCoinRow[]),
     ]);
@@ -483,8 +391,40 @@ export async function POST(request: Request) {
       )
       .filter((quote): quote is ProviderQuote => !!quote);
 
+    const resolved = new Set(quotes.map((q) => q.slug));
+    const unresolvedSlugs = sources
+      .filter((s) => !resolved.has(s.slug))
+      .map((s) => ({
+        slug: s.slug,
+        reason:
+          s.provider === 'abantether' && abanTetherRes.status === 'rejected'
+            ? 'AbanTether websocket unavailable'
+            : s.provider === 'zarpay' && zarpayRes.status === 'rejected'
+              ? 'Zarpay provider unavailable'
+              : 'Provider responded but no quote found for fetchKey',
+      }));
+
+    const failedProviders: Array<{ provider: string; error: string }> = [];
+    if (abanTetherRes.status === 'rejected') {
+      failedProviders.push({
+        provider: 'abantether',
+        error: abanTetherRes.reason instanceof Error ? abanTetherRes.reason.message : String(abanTetherRes.reason),
+      });
+    }
+    if (zarpayRes.status === 'rejected') {
+      failedProviders.push({
+        provider: 'zarpay',
+        error: zarpayRes.reason instanceof Error ? zarpayRes.reason.message : String(zarpayRes.reason),
+      });
+    }
+
     return NextResponse.json(
-      { quotes },
+      {
+        quotes,
+        failedProviders,
+        unresolvedSlugs,
+        unknownRequestedSlugs,
+      },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (error) {

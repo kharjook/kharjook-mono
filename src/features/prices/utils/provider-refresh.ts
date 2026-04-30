@@ -19,6 +19,16 @@ export interface ProviderQuote {
 
 interface FetchProviderQuotesResponse {
   quotes: ProviderQuote[];
+  failedProviders?: Array<{ provider: string; error: string }>;
+  unresolvedSlugs?: Array<{ slug: string; reason: string }>;
+  unknownRequestedSlugs?: string[];
+}
+
+export interface ProviderQuoteFetchResult {
+  quotes: ProviderQuote[];
+  failedProviders: Array<{ provider: string; error: string }>;
+  unresolvedSlugs: Array<{ slug: string; reason: string }>;
+  unknownRequestedSlugs: string[];
 }
 
 interface PersistProviderQuotesInput {
@@ -84,8 +94,20 @@ export function mergeGlobalUsdDollarQuotes(
 }
 
 export async function fetchProviderQuotes(slugs: string[]): Promise<ProviderQuote[]> {
+  const result = await fetchProviderQuotesDetailed(slugs);
+  return result.quotes;
+}
+
+export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<ProviderQuoteFetchResult> {
   const uniqueSlugs = Array.from(new Set(slugs.filter(Boolean)));
-  if (uniqueSlugs.length === 0) return [];
+  if (uniqueSlugs.length === 0) {
+    return {
+      quotes: [],
+      failedProviders: [],
+      unresolvedSlugs: [],
+      unknownRequestedSlugs: [],
+    };
+  }
 
   const response = await fetch('/api/prices/quotes', {
     method: 'POST',
@@ -104,7 +126,12 @@ export async function fetchProviderQuotes(slugs: string[]): Promise<ProviderQuot
   }
 
   const payload = JSON.parse(raw) as FetchProviderQuotesResponse;
-  return Array.isArray(payload.quotes) ? payload.quotes : [];
+  return {
+    quotes: Array.isArray(payload.quotes) ? payload.quotes : [],
+    failedProviders: Array.isArray(payload.failedProviders) ? payload.failedProviders : [],
+    unresolvedSlugs: Array.isArray(payload.unresolvedSlugs) ? payload.unresolvedSlugs : [],
+    unknownRequestedSlugs: Array.isArray(payload.unknownRequestedSlugs) ? payload.unknownRequestedSlugs : [],
+  };
 }
 
 export async function persistCurrencyRate(
