@@ -8,10 +8,8 @@ import {
 } from '@/features/prices/constants/price-sources';
 
 export const runtime = 'nodejs';
-/** Vercel: Zarpay is two sequential fetches; prod TLS + cold start needs headroom. */
 export const maxDuration = 60;
 
-/** Prefer IPv4 — many cloud egress paths hang on broken IPv6 to regional hosts. */
 dns.setDefaultResultOrder('ipv4first');
 
 const USER_AGENT =
@@ -22,29 +20,10 @@ const BROWSER_LIKE_HEADERS: Record<string, string> = {
   'accept-encoding': 'gzip, deflate, br',
 };
 
-/** Aban REST one round-trip; datacenter egress can be slower than localhost. */
-const ABAN_FETCH_TIMEOUT_MS = 36_000;
-/** Zarpay: HTML challenge then JSON — one budget for both hops. */
-const ZARPAY_CHAIN_TIMEOUT_MS = 54_000;
-/** Nobitex public stats — single JSON, often reachable when Aban blocks datacenter egress. */
-const NOBITEX_STATS_TIMEOUT_MS = 22_000;
+const ABAN_FETCH_TIMEOUT_MS = 25_000;
+const ZARPAY_FETCH_TIMEOUT_MS = 25_000;
 
 const ABORT_RETRY_DELAY_MS = 600;
-
-/** Nobitex `market/stats` uses *-rls keys; prices are Rial (÷10 = Toman). */
-const NOBITEX_FETCH_KEY_TO_STAT: Record<string, string> = {
-  USDT: 'usdt-rls',
-  BTC: 'btc-rls',
-  ETH: 'eth-rls',
-  SOL: 'sol-rls',
-  PAXG: 'paxg-rls',
-};
-
-interface NobitexStatRow {
-  bestSell?: string;
-  bestBuy?: string;
-  latest?: string;
-}
 
 function isAbortLike(reason: unknown): boolean {
   const msg =
@@ -128,30 +107,93 @@ interface ProviderQuote {
 }
 
 interface ZarpayCoinRow {
-  symbol: string;
-  buy_price: string;
-  sell_price: string;
+  symbol?: string;
+  buy_price?: string | number;
+  sell_price?: string | number;
+  price?: string | number;
 }
 
 interface AbanTetherMarketRow {
-  symbol: string;
-  buy_price: string;
-  sell_price: string;
+  symbol?: string;
+  buy_price?: string | number;
+  sell_price?: string | number;
+  buy?: string | number;
+  sell?: string | number;
+  price?: string | number;
   active?: boolean;
 }
 
-function solveZarpayCookieHeader(html: string): string {
-  const challenge = html.match(
-    /<script type="text\/javascript">([\s\S]*?)<\/script><\/body>/
-  )?.[1];
+function tryParseJsonPayload(payload: string): unknown | null {
+  try {
+    return JSON.parse(payload) as unknown;
+  } catch {
+    return null;
+  }
+}
 
-  if (!challenge) {
-    throw new Error('Zarpay challenge script not found.');
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number,
+  headers?: Record<string, string>
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        'user-agent': USER_AGENT,
+        accept: 'application/json, text/plain, */*',
+        ...BROWSER_LIKE_HEADERS,
+        ...(headers ?? {}),
+      },
+    });
+    const payload = await response.text();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText} body=${payload.slice(0, 180)}`);
+    }
+    const parsed = tryParseJsonPayload(payload);
+    if (!parsed) {
+      throw new Error(`Upstream returned non-JSON payload: ${payload.slice(0, 180)}`);
+    }
+    return parsed;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseZarpayRows(payload: unknown): ZarpayCoinRow[] {
+  if (Array.isArray(payload)) {
+    return payload as ZarpayCoinRow[];
+  }
+  if (!payload || typeof payload !== 'object') return [];
+  const root = payload as Record<string, unknown>;
+  if (Array.isArray(root.data)) return root.data as ZarpayCoinRow[];
+  if (Array.isArray(root.result)) return root.result as ZarpayCoinRow[];
+  if (Array.isArray(root.coins)) return root.coins as ZarpayCoinRow[];
+  return [];
+}
+
+function solveZarpayCookieHeader(html: string): string {
+  const scripts = Array.from(
+    html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi),
+    (match) => match[1]?.trim()
+  ).filter((code): code is string => !!code);
+
+  if (scripts.length === 0) {
+    throw new Error('Zarpay challenge scripts not found');
   }
 
   const cookies: string[] = [];
   const document = {
     addEventListener: (_event: string, callback: () => void) => callback(),
+    getElementsByTagName: () => [{ innerHTML: '' }],
+    getElementById: () => ({
+      getElementsByClassName: () => [{ textContent: '' }],
+      classList: { remove() {} },
+    }),
   };
 
   Object.defineProperty(document, 'cookie', {
@@ -168,6 +210,7 @@ function solveZarpayCookieHeader(html: string): string {
     exports: undefined,
     module: undefined,
     document,
+    window: { Intl },
     location: { reload() {} },
     setTimeout: (callback: () => void) => callback(),
     encodeURIComponent,
@@ -183,11 +226,13 @@ function solveZarpayCookieHeader(html: string): string {
     console,
   });
 
-  new Script(challenge).runInContext(context, { timeout: 5000 });
+  for (const code of scripts) {
+    new Script(code).runInContext(context, { timeout: 5000 });
+  }
 
   const header = cookies.map((value) => value.split(';', 1)[0]).join('; ');
   if (!header) {
-    throw new Error('Zarpay challenge produced no cookies.');
+    throw new Error('Zarpay challenge produced no cookies');
   }
   return header;
 }
@@ -195,48 +240,63 @@ function solveZarpayCookieHeader(html: string): string {
 async function fetchZarpayCoinsCore(): Promise<ZarpayCoinRow[]> {
   const url = 'https://zarpay24.com/market/coins/';
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ZARPAY_CHAIN_TIMEOUT_MS);
-  let challengeHtml: string;
-  let payload: string;
+  const timer = setTimeout(() => controller.abort(), ZARPAY_FETCH_TIMEOUT_MS);
+  let parsed: unknown | null = null;
   try {
-    const res1 = await fetch(url, {
+    const first = await fetch(url, {
+      method: 'GET',
       cache: 'no-store',
       signal: controller.signal,
       headers: {
         'user-agent': USER_AGENT,
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        ...BROWSER_LIKE_HEADERS,
-      },
-    });
-    if (!res1.ok) {
-      throw new Error(`Remote fetch failed: ${res1.status} ${res1.statusText}`);
-    }
-    challengeHtml = await res1.text();
-    const cookie = solveZarpayCookieHeader(challengeHtml);
-    const res2 = await fetch(url, {
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        'user-agent': USER_AGENT,
-        ...BROWSER_LIKE_HEADERS,
-        cookie,
         accept: 'application/json, text/plain, */*',
+        ...BROWSER_LIKE_HEADERS,
       },
     });
-    if (!res2.ok) {
-      throw new Error(`Remote fetch failed: ${res2.status} ${res2.statusText}`);
+    const firstPayload = await first.text();
+    if (!first.ok) {
+      throw new Error(`HTTP ${first.status} ${first.statusText} body=${firstPayload.slice(0, 180)}`);
     }
-    payload = await res2.text();
+    parsed = tryParseJsonPayload(firstPayload);
+    if (!parsed) {
+      const cookie = solveZarpayCookieHeader(firstPayload);
+      const second = await fetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: {
+          'user-agent': USER_AGENT,
+          accept: 'application/json, text/plain, */*',
+          ...BROWSER_LIKE_HEADERS,
+          cookie,
+        },
+      });
+      const secondPayload = await second.text();
+      if (!second.ok) {
+        throw new Error(
+          `HTTP ${second.status} ${second.statusText} body=${secondPayload.slice(0, 180)}`
+        );
+      }
+      parsed = tryParseJsonPayload(secondPayload);
+      if (!parsed) {
+        throw new Error(
+          `Zarpay returned non-JSON after challenge: ${secondPayload.slice(0, 180)}`
+        );
+      }
+    }
   } finally {
     clearTimeout(timer);
   }
 
-  const parsed = JSON.parse(payload) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error('Zarpay market payload is not an array.');
+  if (!parsed) {
+    throw new Error('Zarpay response parsing failed');
   }
 
-  return parsed as ZarpayCoinRow[];
+  const rows = parseZarpayRows(parsed);
+  if (rows.length === 0) {
+    throw new Error('Zarpay API payload contained no rows');
+  }
+  return rows;
 }
 
 function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
@@ -244,94 +304,19 @@ function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
 }
 
 async function fetchAbanTetherMarketsCore(): Promise<Record<string, AbanTetherMarketRow>> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ABAN_FETCH_TIMEOUT_MS);
-  let payload = '';
-  try {
-    const response = await fetch('https://api.abantether.com/api/v1/manager/otc/ticker', {
-      method: 'GET',
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        'user-agent': USER_AGENT,
-        accept: 'application/json, text/plain, */*',
-        ...BROWSER_LIKE_HEADERS,
-      },
-    });
-    payload = await response.text();
-  } finally {
-    clearTimeout(timer);
-  }
-  const parsed = JSON.parse(payload) as unknown;
+  const parsed = await fetchJsonWithTimeout(
+    'https://api.abantether.com/api/v1/manager/otc/ticker',
+    ABAN_FETCH_TIMEOUT_MS
+  );
   const markets = extractAbanMarketsFromPayload(parsed);
   if (Object.keys(markets).length === 0) {
-    throw new Error(`AbanTether API payload has no parseable markets. body=${payload.slice(0, 300)}`);
+    throw new Error('AbanTether API payload has no parseable markets');
   }
   return markets;
 }
 
 function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
   return withUpstreamRetry('abantether', fetchAbanTetherMarketsCore);
-}
-
-async function fetchNobitexAbanShapedMarketsCore(): Promise<
-  Record<string, AbanTetherMarketRow>
-> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NOBITEX_STATS_TIMEOUT_MS);
-  let payload = '';
-  try {
-    const response = await fetch('https://apiv2.nobitex.ir/market/stats', {
-      method: 'GET',
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        'user-agent': USER_AGENT,
-        accept: 'application/json',
-        ...BROWSER_LIKE_HEADERS,
-      },
-    });
-    payload = await response.text();
-    if (!response.ok) {
-      throw new Error(`Nobitex stats HTTP ${response.status}`);
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const parsed = JSON.parse(payload) as {
-    status?: string;
-    stats?: Record<string, NobitexStatRow>;
-  };
-  if (parsed.status !== 'ok' || !parsed.stats || typeof parsed.stats !== 'object') {
-    throw new Error('Nobitex stats payload invalid');
-  }
-
-  const out: Record<string, AbanTetherMarketRow> = {};
-  for (const [fetchKey, statKey] of Object.entries(NOBITEX_FETCH_KEY_TO_STAT)) {
-    const row = parsed.stats[statKey];
-    if (!row) continue;
-    const latest = toNumber(row.latest);
-    const rialSell = toNumber(row.bestSell) || latest;
-    const rialBuy = toNumber(row.bestBuy) || latest;
-    const sellToman = rialSell > 0 ? rialSell / 10 : 0;
-    const buyToman = rialBuy > 0 ? rialBuy / 10 : 0;
-    if (!(sellToman > 0) && !(buyToman > 0)) continue;
-    const pairKey = `${fetchKey}IRT`;
-    out[pairKey] = {
-      symbol: fetchKey,
-      sell_price: String(sellToman > 0 ? sellToman : buyToman),
-      buy_price: String(buyToman > 0 ? buyToman : sellToman),
-    };
-  }
-  if (Object.keys(out).length === 0) {
-    throw new Error('Nobitex stats contained no mapped RLS pairs');
-  }
-  return out;
-}
-
-function fetchNobitexAbanShapedMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
-  return withUpstreamRetry('nobitex', fetchNobitexAbanShapedMarketsCore);
 }
 
 function toNumber(value: unknown): number {
@@ -399,12 +384,14 @@ function toZarpayQuote(
 ): ProviderQuote | null {
   if (source.provider !== 'zarpay' || !source.fetchKey) return null;
 
-  const row = market.find((item) => item.symbol === source.fetchKey);
+  const bySymbol = new Map(
+    market.map((row) => [String(row.symbol ?? '').trim().toUpperCase(), row])
+  );
+  const row = bySymbol.get(String(source.fetchKey).trim().toUpperCase());
   if (!row) return null;
 
-  // For portfolio valuation we prefer the realizable mark, so use sell_price.
-  const sell = Number(row.sell_price);
-  const buy = Number(row.buy_price);
+  const sell = toNumber(row.sell_price ?? row.price);
+  const buy = toNumber(row.buy_price ?? row.price);
   const priceToman = sell > 0 ? sell : buy;
 
   if (!Number.isFinite(priceToman) || priceToman <= 0) return null;
@@ -427,9 +414,8 @@ function toAbanTetherQuote(
   const row = markets[pairKey];
   if (!row) return null;
 
-  // Same valuation rule as other providers: realizable mark = sell side.
-  const sell = Number(row.sell_price);
-  const buy = Number(row.buy_price);
+  const sell = toNumber(row.sell_price ?? row.sell ?? row.price);
+  const buy = toNumber(row.buy_price ?? row.buy ?? row.price);
   const priceToman = sell > 0 ? sell : buy;
 
   if (!Number.isFinite(priceToman) || priceToman <= 0) return null;
@@ -473,24 +459,6 @@ function abanSourcesSatisfiedByMarkets(
     }
   }
   return true;
-}
-
-function formatAbanNobitexFailure(
-  abanRes: PromiseSettledResult<Record<string, AbanTetherMarketRow>>,
-  nobitexRes: PromiseSettledResult<Record<string, AbanTetherMarketRow>>
-): string {
-  const parts: string[] = [];
-  if (abanRes.status === 'rejected') {
-    parts.push(`Aban: ${formatUpstreamError(abanRes.reason)}`);
-  } else if (Object.keys(abanRes.value).length === 0) {
-    parts.push('Aban: empty markets');
-  }
-  if (nobitexRes.status === 'rejected') {
-    parts.push(`Nobitex: ${formatUpstreamError(nobitexRes.reason)}`);
-  } else if (Object.keys(nobitexRes.value).length === 0) {
-    parts.push('Nobitex: empty markets');
-  }
-  return parts.join(' | ') || 'Aban and Nobitex unavailable';
 }
 
 export async function OPTIONS(request: Request) {
@@ -540,31 +508,18 @@ export async function POST(request: Request) {
     const zarpaySources = sources.filter((source) => source.provider === 'zarpay');
     const needAbanFamily = abanTetherSources.length > 0;
 
-    const [abanTetherRes, zarpayRes, nobitexRes] = await Promise.allSettled([
+    const [abanTetherRes, zarpayRes] = await Promise.allSettled([
       needAbanFamily
         ? fetchAbanTetherMarkets()
         : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
       zarpaySources.length > 0 ? fetchZarpayCoins() : Promise.resolve([] as ZarpayCoinRow[]),
-      needAbanFamily
-        ? fetchNobitexAbanShapedMarkets()
-        : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
     ]);
 
-    const abanPrimary =
-      abanTetherRes.status === 'fulfilled' ? abanTetherRes.value : {};
-    const nobitexMarkets =
-      nobitexRes.status === 'fulfilled' ? nobitexRes.value : {};
-    const abanTetherMarkets: Record<string, AbanTetherMarketRow> = {
-      ...nobitexMarkets,
-      ...abanPrimary,
-    };
+    const abanTetherMarkets = abanTetherRes.status === 'fulfilled' ? abanTetherRes.value : {};
     const zarpayMarket = zarpayRes.status === 'fulfilled' ? zarpayRes.value : [];
 
     if (abanTetherRes.status === 'rejected') {
       console.warn('price quote refresh warning: abantether failed', abanTetherRes.reason);
-    }
-    if (nobitexRes.status === 'rejected') {
-      console.warn('price quote refresh warning: nobitex fallback failed', nobitexRes.reason);
     }
     if (zarpayRes.status === 'rejected') {
       console.warn('price quote refresh warning: zarpay failed', zarpayRes.reason);
@@ -573,10 +528,6 @@ export async function POST(request: Request) {
     const abanOk = needAbanFamily
       ? abanSourcesSatisfiedByMarkets(abanTetherSources, abanTetherMarkets)
       : true;
-    const abanBothLegsFailed =
-      needAbanFamily &&
-      abanTetherRes.status === 'rejected' &&
-      nobitexRes.status === 'rejected';
 
     const quotes = sources
       .map((source) =>
@@ -594,10 +545,10 @@ export async function POST(request: Request) {
       .map((s) => ({
         slug: s.slug,
         reason:
-          s.provider === 'abantether' && abanBothLegsFailed
-            ? 'AbanTether API unavailable (Nobitex backup also failed)'
+          s.provider === 'abantether' && abanTetherRes.status === 'rejected'
+            ? 'AbanTether API unavailable'
             : s.provider === 'abantether' && !abanOk
-              ? 'No quote from Aban or Nobitex for this asset'
+              ? 'No quote from AbanTether for this asset'
               : s.provider === 'zarpay' && zarpayRes.status === 'rejected'
                 ? 'Zarpay provider unavailable'
                 : 'Provider responded but no quote found for fetchKey',
@@ -607,7 +558,10 @@ export async function POST(request: Request) {
     if (needAbanFamily && !abanOk) {
       failedProviders.push({
         provider: 'abantether',
-        error: formatAbanNobitexFailure(abanTetherRes, nobitexRes),
+        error:
+          abanTetherRes.status === 'rejected'
+            ? formatUpstreamError(abanTetherRes.reason)
+            : 'AbanTether returned no matching markets for requested slugs',
       });
     }
     if (zarpayRes.status === 'rejected') {

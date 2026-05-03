@@ -95,6 +95,13 @@ export const PRICE_SOURCES: readonly PriceSource[] = [
     fetchKey: 'SILVER',
     updatesRate: null,
   },
+  {
+    slug: 'zarpay.copper',
+    provider: 'zarpay',
+    label: 'مس · زرپی',
+    fetchKey: 'COPPER',
+    updatesRate: null,
+  },
 ];
 
 export const PRICE_SOURCE_MAP: Readonly<Record<string, PriceSource>> =
