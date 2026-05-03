@@ -1,4 +1,5 @@
 import { createContext, Script } from 'node:vm';
+import dns from 'node:dns';
 import { NextResponse } from 'next/server';
 import {
   APP_GLOBAL_USD_SLUG,
@@ -10,15 +11,25 @@ export const runtime = 'nodejs';
 /** Vercel: Zarpay is two sequential fetches; prod TLS + cold start needs headroom. */
 export const maxDuration = 60;
 
+/** Prefer IPv4 — many cloud egress paths hang on broken IPv6 to regional hosts. */
+dns.setDefaultResultOrder('ipv4first');
+
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
 
-/** Aban REST one round-trip; datacenter egress can be slower than localhost. */
-const ABAN_FETCH_TIMEOUT_MS = 32_000;
-/** Zarpay: HTML challenge then JSON — one budget for both hops. */
-const ZARPAY_CHAIN_TIMEOUT_MS = 52_000;
+const BROWSER_LIKE_HEADERS: Record<string, string> = {
+  'accept-language': 'en-US,en;q=0.9,fa;q=0.8',
+  'accept-encoding': 'gzip, deflate, br',
+};
 
-function formatUpstreamError(reason: unknown): string {
+/** Aban REST one round-trip; datacenter egress can be slower than localhost. */
+const ABAN_FETCH_TIMEOUT_MS = 36_000;
+/** Zarpay: HTML challenge then JSON — one budget for both hops. */
+const ZARPAY_CHAIN_TIMEOUT_MS = 54_000;
+
+const ABORT_RETRY_DELAY_MS = 600;
+
+function isAbortLike(reason: unknown): boolean {
   const msg =
     reason instanceof Error
       ? reason.message
@@ -26,14 +37,70 @@ function formatUpstreamError(reason: unknown): string {
         ? String((reason as { message: unknown }).message)
         : String(reason);
   const name = reason instanceof Error ? reason.name : '';
-  if (
+  return (
     name === 'AbortError' ||
     msg.includes('aborted') ||
     msg.includes('The operation was aborted')
-  ) {
+  );
+}
+
+function formatUpstreamError(reason: unknown): string {
+  if (isAbortLike(reason)) {
     return 'Upstream request timed out or was aborted (network or serverless limit)';
   }
+  const msg =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === 'object' && reason !== null && 'message' in reason
+        ? String((reason as { message: unknown }).message)
+        : String(reason);
   return msg;
+}
+
+function corsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('origin');
+  if (origin) {
+    return {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'content-type',
+      Vary: 'Origin',
+    };
+  }
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'content-type',
+  };
+}
+
+function quoteResponse(
+  request: Request,
+  data: unknown,
+  init?: { status?: number }
+): NextResponse {
+  return NextResponse.json(data, {
+    status: init?.status ?? 200,
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
+      ...corsHeaders(request),
+    },
+  });
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withUpstreamRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (first) {
+    if (!isAbortLike(first)) throw first;
+    console.warn(`price quotes: ${label} aborted, retrying once`, first);
+    await sleep(ABORT_RETRY_DELAY_MS);
+    return await fn();
+  }
 }
 
 interface ProviderQuote {
@@ -108,7 +175,7 @@ function solveZarpayCookieHeader(html: string): string {
   return header;
 }
 
-async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
+async function fetchZarpayCoinsCore(): Promise<ZarpayCoinRow[]> {
   const url = 'https://zarpay24.com/market/coins/';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ZARPAY_CHAIN_TIMEOUT_MS);
@@ -118,7 +185,11 @@ async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
     const res1 = await fetch(url, {
       cache: 'no-store',
       signal: controller.signal,
-      headers: { 'user-agent': USER_AGENT },
+      headers: {
+        'user-agent': USER_AGENT,
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        ...BROWSER_LIKE_HEADERS,
+      },
     });
     if (!res1.ok) {
       throw new Error(`Remote fetch failed: ${res1.status} ${res1.statusText}`);
@@ -130,6 +201,7 @@ async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
       signal: controller.signal,
       headers: {
         'user-agent': USER_AGENT,
+        ...BROWSER_LIKE_HEADERS,
         cookie,
         accept: 'application/json, text/plain, */*',
       },
@@ -150,7 +222,11 @@ async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
   return parsed as ZarpayCoinRow[];
 }
 
-async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
+function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
+  return withUpstreamRetry('zarpay', fetchZarpayCoinsCore);
+}
+
+async function fetchAbanTetherMarketsCore(): Promise<Record<string, AbanTetherMarketRow>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ABAN_FETCH_TIMEOUT_MS);
   let payload = '';
@@ -161,7 +237,8 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
       signal: controller.signal,
       headers: {
         'user-agent': USER_AGENT,
-        accept: 'application/json',
+        accept: 'application/json, text/plain, */*',
+        ...BROWSER_LIKE_HEADERS,
       },
     });
     payload = await response.text();
@@ -174,6 +251,10 @@ async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarket
     throw new Error(`AbanTether API payload has no parseable markets. body=${payload.slice(0, 300)}`);
   }
   return markets;
+}
+
+function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
+  return withUpstreamRetry('abantether', fetchAbanTetherMarketsCore);
 }
 
 function toNumber(value: unknown): number {
@@ -303,6 +384,13 @@ function toAppDollarQuote(
   };
 }
 
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(request),
+  });
+}
+
 export async function POST(request: Request) {
   try {
     let requestedSlugs: string[];
@@ -312,12 +400,10 @@ export async function POST(request: Request) {
         ? body.slugs.filter((value): value is string => typeof value === 'string')
         : [];
     } catch {
-      return NextResponse.json(
+      return quoteResponse(
+        request,
         { error: 'INVALID_JSON', quotes: [] as ProviderQuote[] },
-        {
-          status: 400,
-          headers: { 'Cache-Control': 'no-store, max-age=0' },
-        }
+        { status: 400 }
       );
     }
 
@@ -335,10 +421,7 @@ export async function POST(request: Request) {
     );
 
     if (sources.length === 0) {
-      return NextResponse.json(
-        { quotes: [] satisfies ProviderQuote[] },
-        { headers: { 'Cache-Control': 'no-store, max-age=0' } }
-      );
+      return quoteResponse(request, { quotes: [] satisfies ProviderQuote[] });
     }
 
     const abanTetherSources = sources.filter(
@@ -400,23 +483,14 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json(
-      {
-        quotes,
-        failedProviders,
-        unresolvedSlugs,
-        unknownRequestedSlugs,
-      },
-      { headers: { 'Cache-Control': 'no-store, max-age=0' } }
-    );
+    return quoteResponse(request, {
+      quotes,
+      failedProviders,
+      unresolvedSlugs,
+      unknownRequestedSlugs,
+    });
   } catch (error) {
     console.error('price quote refresh failed', error);
-    return NextResponse.json(
-      { error: 'PRICE_QUOTE_REFRESH_FAILED' },
-      {
-        status: 500,
-        headers: { 'Cache-Control': 'no-store, max-age=0' },
-      }
-    );
+    return quoteResponse(request, { error: 'PRICE_QUOTE_REFRESH_FAILED' }, { status: 500 });
   }
 }
