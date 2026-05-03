@@ -7,13 +7,34 @@ import {
 } from '@/features/prices/constants/price-sources';
 
 export const runtime = 'nodejs';
-/** Vercel / long upstream chains (Aban WS + Zarpay challenge). */
-export const maxDuration = 45;
+/** Vercel: Zarpay is two sequential fetches; prod TLS + cold start needs headroom. */
+export const maxDuration = 60;
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
 
-const UPSTREAM_TIMEOUT_MS = 14_000;
+/** Aban REST one round-trip; datacenter egress can be slower than localhost. */
+const ABAN_FETCH_TIMEOUT_MS = 32_000;
+/** Zarpay: HTML challenge then JSON — one budget for both hops. */
+const ZARPAY_CHAIN_TIMEOUT_MS = 52_000;
+
+function formatUpstreamError(reason: unknown): string {
+  const msg =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === 'object' && reason !== null && 'message' in reason
+        ? String((reason as { message: unknown }).message)
+        : String(reason);
+  const name = reason instanceof Error ? reason.name : '';
+  if (
+    name === 'AbortError' ||
+    msg.includes('aborted') ||
+    msg.includes('The operation was aborted')
+  ) {
+    return 'Upstream request timed out or was aborted (network or serverless limit)';
+  }
+  return msg;
+}
 
 interface ProviderQuote {
   slug: string;
@@ -33,30 +54,6 @@ interface AbanTetherMarketRow {
   buy_price: string;
   sell_price: string;
   active?: boolean;
-}
-
-async function fetchText(url: string, init?: RequestInit): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      ...init,
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        'user-agent': USER_AGENT,
-        ...(init?.headers ?? {}),
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Remote fetch failed: ${response.status} ${response.statusText}`);
-    }
-
-    return response.text();
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function solveZarpayCookieHeader(html: string): string {
@@ -113,14 +110,37 @@ function solveZarpayCookieHeader(html: string): string {
 
 async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
   const url = 'https://zarpay24.com/market/coins/';
-  const challengeHtml = await fetchText(url);
-  const cookie = solveZarpayCookieHeader(challengeHtml);
-  const payload = await fetchText(url, {
-    headers: {
-      cookie,
-      accept: 'application/json, text/plain, */*',
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ZARPAY_CHAIN_TIMEOUT_MS);
+  let challengeHtml: string;
+  let payload: string;
+  try {
+    const res1 = await fetch(url, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { 'user-agent': USER_AGENT },
+    });
+    if (!res1.ok) {
+      throw new Error(`Remote fetch failed: ${res1.status} ${res1.statusText}`);
+    }
+    challengeHtml = await res1.text();
+    const cookie = solveZarpayCookieHeader(challengeHtml);
+    const res2 = await fetch(url, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        'user-agent': USER_AGENT,
+        cookie,
+        accept: 'application/json, text/plain, */*',
+      },
+    });
+    if (!res2.ok) {
+      throw new Error(`Remote fetch failed: ${res2.status} ${res2.statusText}`);
+    }
+    payload = await res2.text();
+  } finally {
+    clearTimeout(timer);
+  }
 
   const parsed = JSON.parse(payload) as unknown;
   if (!Array.isArray(parsed)) {
@@ -132,7 +152,7 @@ async function fetchZarpayCoins(): Promise<ZarpayCoinRow[]> {
 
 async function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), ABAN_FETCH_TIMEOUT_MS);
   let payload = '';
   try {
     const response = await fetch('https://api.abantether.com/api/v1/manager/otc/ticker', {
@@ -370,13 +390,13 @@ export async function POST(request: Request) {
     if (abanTetherRes.status === 'rejected') {
       failedProviders.push({
         provider: 'abantether',
-        error: abanTetherRes.reason instanceof Error ? abanTetherRes.reason.message : String(abanTetherRes.reason),
+        error: formatUpstreamError(abanTetherRes.reason),
       });
     }
     if (zarpayRes.status === 'rejected') {
       failedProviders.push({
         provider: 'zarpay',
-        error: zarpayRes.reason instanceof Error ? zarpayRes.reason.message : String(zarpayRes.reason),
+        error: formatUpstreamError(zarpayRes.reason),
       });
     }
 
