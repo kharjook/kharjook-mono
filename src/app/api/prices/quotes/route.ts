@@ -26,8 +26,25 @@ const BROWSER_LIKE_HEADERS: Record<string, string> = {
 const ABAN_FETCH_TIMEOUT_MS = 36_000;
 /** Zarpay: HTML challenge then JSON — one budget for both hops. */
 const ZARPAY_CHAIN_TIMEOUT_MS = 54_000;
+/** Nobitex public stats — single JSON, often reachable when Aban blocks datacenter egress. */
+const NOBITEX_STATS_TIMEOUT_MS = 22_000;
 
 const ABORT_RETRY_DELAY_MS = 600;
+
+/** Nobitex `market/stats` uses *-rls keys; prices are Rial (÷10 = Toman). */
+const NOBITEX_FETCH_KEY_TO_STAT: Record<string, string> = {
+  USDT: 'usdt-rls',
+  BTC: 'btc-rls',
+  ETH: 'eth-rls',
+  SOL: 'sol-rls',
+  PAXG: 'paxg-rls',
+};
+
+interface NobitexStatRow {
+  bestSell?: string;
+  bestBuy?: string;
+  latest?: string;
+}
 
 function isAbortLike(reason: unknown): boolean {
   const msg =
@@ -257,6 +274,66 @@ function fetchAbanTetherMarkets(): Promise<Record<string, AbanTetherMarketRow>> 
   return withUpstreamRetry('abantether', fetchAbanTetherMarketsCore);
 }
 
+async function fetchNobitexAbanShapedMarketsCore(): Promise<
+  Record<string, AbanTetherMarketRow>
+> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NOBITEX_STATS_TIMEOUT_MS);
+  let payload = '';
+  try {
+    const response = await fetch('https://apiv2.nobitex.ir/market/stats', {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: {
+        'user-agent': USER_AGENT,
+        accept: 'application/json',
+        ...BROWSER_LIKE_HEADERS,
+      },
+    });
+    payload = await response.text();
+    if (!response.ok) {
+      throw new Error(`Nobitex stats HTTP ${response.status}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const parsed = JSON.parse(payload) as {
+    status?: string;
+    stats?: Record<string, NobitexStatRow>;
+  };
+  if (parsed.status !== 'ok' || !parsed.stats || typeof parsed.stats !== 'object') {
+    throw new Error('Nobitex stats payload invalid');
+  }
+
+  const out: Record<string, AbanTetherMarketRow> = {};
+  for (const [fetchKey, statKey] of Object.entries(NOBITEX_FETCH_KEY_TO_STAT)) {
+    const row = parsed.stats[statKey];
+    if (!row) continue;
+    const latest = toNumber(row.latest);
+    const rialSell = toNumber(row.bestSell) || latest;
+    const rialBuy = toNumber(row.bestBuy) || latest;
+    const sellToman = rialSell > 0 ? rialSell / 10 : 0;
+    const buyToman = rialBuy > 0 ? rialBuy / 10 : 0;
+    if (!(sellToman > 0) && !(buyToman > 0)) continue;
+    const pairKey = `${fetchKey}IRT`;
+    out[pairKey] = {
+      symbol: fetchKey,
+      sell_price: String(sellToman > 0 ? sellToman : buyToman),
+      buy_price: String(buyToman > 0 ? buyToman : sellToman),
+    };
+  }
+  if (Object.keys(out).length === 0) {
+    throw new Error('Nobitex stats contained no mapped RLS pairs');
+  }
+  return out;
+}
+
+function fetchNobitexAbanShapedMarkets(): Promise<Record<string, AbanTetherMarketRow>> {
+  return withUpstreamRetry('nobitex', fetchNobitexAbanShapedMarketsCore);
+}
+
 function toNumber(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -384,6 +461,38 @@ function toAppDollarQuote(
   };
 }
 
+function abanSourcesSatisfiedByMarkets(
+  abanTetherSources: PriceSource[],
+  markets: Record<string, AbanTetherMarketRow>
+): boolean {
+  for (const s of abanTetherSources) {
+    if (s.slug === APP_GLOBAL_USD_SLUG) {
+      if (!toAppDollarQuote(s, markets)) return false;
+    } else {
+      if (!toAbanTetherQuote(s, markets)) return false;
+    }
+  }
+  return true;
+}
+
+function formatAbanNobitexFailure(
+  abanRes: PromiseSettledResult<Record<string, AbanTetherMarketRow>>,
+  nobitexRes: PromiseSettledResult<Record<string, AbanTetherMarketRow>>
+): string {
+  const parts: string[] = [];
+  if (abanRes.status === 'rejected') {
+    parts.push(`Aban: ${formatUpstreamError(abanRes.reason)}`);
+  } else if (Object.keys(abanRes.value).length === 0) {
+    parts.push('Aban: empty markets');
+  }
+  if (nobitexRes.status === 'rejected') {
+    parts.push(`Nobitex: ${formatUpstreamError(nobitexRes.reason)}`);
+  } else if (Object.keys(nobitexRes.value).length === 0) {
+    parts.push('Nobitex: empty markets');
+  }
+  return parts.join(' | ') || 'Aban and Nobitex unavailable';
+}
+
 export async function OPTIONS(request: Request) {
   return new NextResponse(null, {
     status: 204,
@@ -392,6 +501,7 @@ export async function OPTIONS(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let unknownRequestedSlugs: string[] = [];
   try {
     let requestedSlugs: string[];
     try {
@@ -407,7 +517,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const unknownRequestedSlugs = Array.from(
+    unknownRequestedSlugs = Array.from(
       new Set(requestedSlugs.filter((slug) => !findPriceSource(slug)))
     );
 
@@ -428,23 +538,45 @@ export async function POST(request: Request) {
       (source) => source.provider === 'abantether'
     );
     const zarpaySources = sources.filter((source) => source.provider === 'zarpay');
-    // Provider outages should degrade partially, not take down the whole API.
-    const [abanTetherRes, zarpayRes] = await Promise.allSettled([
-      abanTetherSources.length > 0
+    const needAbanFamily = abanTetherSources.length > 0;
+
+    const [abanTetherRes, zarpayRes, nobitexRes] = await Promise.allSettled([
+      needAbanFamily
         ? fetchAbanTetherMarkets()
         : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
       zarpaySources.length > 0 ? fetchZarpayCoins() : Promise.resolve([] as ZarpayCoinRow[]),
+      needAbanFamily
+        ? fetchNobitexAbanShapedMarkets()
+        : Promise.resolve({} as Record<string, AbanTetherMarketRow>),
     ]);
-    const abanTetherMarkets =
+
+    const abanPrimary =
       abanTetherRes.status === 'fulfilled' ? abanTetherRes.value : {};
+    const nobitexMarkets =
+      nobitexRes.status === 'fulfilled' ? nobitexRes.value : {};
+    const abanTetherMarkets: Record<string, AbanTetherMarketRow> = {
+      ...nobitexMarkets,
+      ...abanPrimary,
+    };
     const zarpayMarket = zarpayRes.status === 'fulfilled' ? zarpayRes.value : [];
 
     if (abanTetherRes.status === 'rejected') {
       console.warn('price quote refresh warning: abantether failed', abanTetherRes.reason);
     }
+    if (nobitexRes.status === 'rejected') {
+      console.warn('price quote refresh warning: nobitex fallback failed', nobitexRes.reason);
+    }
     if (zarpayRes.status === 'rejected') {
       console.warn('price quote refresh warning: zarpay failed', zarpayRes.reason);
     }
+
+    const abanOk = needAbanFamily
+      ? abanSourcesSatisfiedByMarkets(abanTetherSources, abanTetherMarkets)
+      : true;
+    const abanBothLegsFailed =
+      needAbanFamily &&
+      abanTetherRes.status === 'rejected' &&
+      nobitexRes.status === 'rejected';
 
     const quotes = sources
       .map((source) =>
@@ -462,18 +594,20 @@ export async function POST(request: Request) {
       .map((s) => ({
         slug: s.slug,
         reason:
-          s.provider === 'abantether' && abanTetherRes.status === 'rejected'
-            ? 'AbanTether API unavailable'
-            : s.provider === 'zarpay' && zarpayRes.status === 'rejected'
-              ? 'Zarpay provider unavailable'
-              : 'Provider responded but no quote found for fetchKey',
+          s.provider === 'abantether' && abanBothLegsFailed
+            ? 'AbanTether API unavailable (Nobitex backup also failed)'
+            : s.provider === 'abantether' && !abanOk
+              ? 'No quote from Aban or Nobitex for this asset'
+              : s.provider === 'zarpay' && zarpayRes.status === 'rejected'
+                ? 'Zarpay provider unavailable'
+                : 'Provider responded but no quote found for fetchKey',
       }));
 
     const failedProviders: Array<{ provider: string; error: string }> = [];
-    if (abanTetherRes.status === 'rejected') {
+    if (needAbanFamily && !abanOk) {
       failedProviders.push({
         provider: 'abantether',
-        error: formatUpstreamError(abanTetherRes.reason),
+        error: formatAbanNobitexFailure(abanTetherRes, nobitexRes),
       });
     }
     if (zarpayRes.status === 'rejected') {
@@ -491,6 +625,17 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('price quote refresh failed', error);
-    return quoteResponse(request, { error: 'PRICE_QUOTE_REFRESH_FAILED' }, { status: 500 });
+    return quoteResponse(request, {
+      quotes: [] satisfies ProviderQuote[],
+      failedProviders: [
+        {
+          provider: 'server',
+          error:
+            error instanceof Error ? error.message : formatUpstreamError(error),
+        },
+      ],
+      unresolvedSlugs: [],
+      unknownRequestedSlugs,
+    });
   }
 }

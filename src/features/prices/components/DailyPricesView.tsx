@@ -162,7 +162,12 @@ export function DailyPricesView() {
         }
       }
     } catch (error) {
-      if (!silent) toast.error('دریافت قیمت از منبع بیرونی ناموفق بود.');
+      if (!silent) {
+        const detail = error instanceof Error ? error.message : String(error);
+        toast.error(`دریافت قیمت از منبع بیرونی ناموفق بود. ${detail}`, {
+          duration: 14_000,
+        });
+      }
       console.error(error);
     } finally {
       setIsRefreshingProviders(false);

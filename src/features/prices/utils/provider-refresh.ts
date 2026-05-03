@@ -115,7 +115,7 @@ export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<Prov
       ? `${window.location.origin}/api/prices/quotes`
       : '/api/prices/quotes';
 
-  const response = await fetch(quotesUrl, {
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -123,15 +123,39 @@ export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<Prov
     credentials: 'omit',
     cache: 'no-store',
     body: JSON.stringify({ slugs: uniqueSlugs }),
-  });
+  };
 
-  const raw = await response.text();
-  if (!response.ok) {
-    const hint = raw.slice(0, 400).trim() || '(empty body)';
-    throw new Error(`Provider quote request failed: ${response.status} — ${hint}`);
+  const doFetch = () => fetch(quotesUrl, requestInit);
+
+  let response: Response;
+  try {
+    response = await doFetch();
+  } catch (first) {
+    await new Promise((r) => setTimeout(r, 700));
+    response = await doFetch();
   }
 
-  const payload = JSON.parse(raw) as FetchProviderQuotesResponse;
+  let raw = await response.text();
+  if (!response.ok && response.status >= 502 && response.status <= 504) {
+    await new Promise((r) => setTimeout(r, 600));
+    response = await doFetch();
+    raw = await response.text();
+  }
+
+  if (!response.ok) {
+    const hint = raw.slice(0, 400).trim() || '(empty body)';
+    throw new Error(`درخواست قیمت ناموفق (${response.status}): ${hint}`);
+  }
+
+  let payload: FetchProviderQuotesResponse;
+  try {
+    payload = JSON.parse(raw) as FetchProviderQuotesResponse;
+  } catch {
+    throw new Error(
+      `پاسخ سرور JSON نبود (احتمالاً خطای میزبان یا پروکسی). شروع پاسخ: ${raw.slice(0, 160).trim()}`
+    );
+  }
+
   return {
     quotes: Array.isArray(payload.quotes) ? payload.quotes : [],
     failedProviders: Array.isArray(payload.failedProviders) ? payload.failedProviders : [],
