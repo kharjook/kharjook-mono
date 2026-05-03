@@ -110,7 +110,12 @@ export async function fetchProviderQuotesDetailed(slugs: string[]): Promise<Prov
     };
   }
 
-  const response = await fetch('/api/prices/quotes', {
+  const quotesUrl =
+    typeof window !== 'undefined' && window.location?.origin
+      ? `${window.location.origin}/api/prices/quotes`
+      : '/api/prices/quotes';
+
+  const response = await fetch(quotesUrl, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
