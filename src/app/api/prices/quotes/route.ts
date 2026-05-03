@@ -9,6 +9,7 @@ import {
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+export const preferredRegion = ['fra1'];
 
 dns.setDefaultResultOrder('ipv4first');
 
@@ -20,8 +21,9 @@ const BROWSER_LIKE_HEADERS: Record<string, string> = {
   'accept-encoding': 'gzip, deflate, br',
 };
 
-const ABAN_FETCH_TIMEOUT_MS = 25_000;
-const ZARPAY_FETCH_TIMEOUT_MS = 25_000;
+const IS_VERCEL = process.env.VERCEL === '1';
+const ABAN_FETCH_TIMEOUT_MS = IS_VERCEL ? 8_000 : 25_000;
+const ZARPAY_FETCH_TIMEOUT_MS = IS_VERCEL ? 8_500 : 25_000;
 
 const ABORT_RETRY_DELAY_MS = 600;
 
@@ -92,6 +94,7 @@ async function withUpstreamRetry<T>(label: string, fn: () => Promise<T>): Promis
   try {
     return await fn();
   } catch (first) {
+    if (IS_VERCEL) throw first;
     if (!isAbortLike(first)) throw first;
     console.warn(`price quotes: ${label} aborted, retrying once`, first);
     await sleep(ABORT_RETRY_DELAY_MS);
