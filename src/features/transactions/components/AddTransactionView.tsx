@@ -690,7 +690,9 @@ function validateForm(form: FormState, wallets: Wallet[]): string | null {
 
 function computeAmountSnapshots(
   form: FormState,
-  wallets: Wallet[]
+  wallets: Wallet[],
+  currencyRates: CurrencyRate[],
+  fallbackUsdRate: number
 ): { toman: number | null; usd: number | null } {
   const usdRate = Number(form.usdRate);
   const validUsdRate = Number.isFinite(usdRate) && usdRate > 0 ? usdRate : null;
@@ -728,8 +730,12 @@ function computeAmountSnapshots(
         if (w.currency === 'IRT') {
           return computeFromAmountPrice(amount, 1);
         }
-        const price = Number(form.priceToman);
-        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+        const explicit = Number(form.priceToman);
+        const price =
+          Number.isFinite(explicit) && explicit > 0
+            ? explicit
+            : walletRateForTransfer(w, currencyRates, fallbackUsdRate, form.usdRate);
+        if (!(price > 0)) return { toman: null, usd: null };
         return computeFromAmountPrice(amount, price);
       }
       if (form.targetKind === 'person') {
@@ -753,8 +759,12 @@ function computeAmountSnapshots(
         if (w.currency === 'IRT') {
           return computeFromAmountPrice(amount, 1);
         }
-        const price = Number(form.priceToman);
-        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
+        const explicit = Number(form.priceToman);
+        const price =
+          Number.isFinite(explicit) && explicit > 0
+            ? explicit
+            : walletRateForTransfer(w, currencyRates, fallbackUsdRate, form.usdRate);
+        if (!(price > 0)) return { toman: null, usd: null };
         return computeFromAmountPrice(amount, price);
       }
       if (form.sourceKind === 'person') {
@@ -914,7 +924,7 @@ function buildPayload(
       break;
   }
 
-  const snap = computeAmountSnapshots(form, wallets);
+  const snap = computeAmountSnapshots(form, wallets, currencyRates, fallbackUsdRate);
   base.amount_toman_at_time = snap.toman;
   base.amount_usd_at_time = snap.usd;
 
@@ -1037,10 +1047,19 @@ export function AddTransactionView({
   };
 
   const addRow = () => {
-    setRows((prev) => [
-      ...prev,
-      buildInitialForm(undefined, { defaultType: sharedType }, usdRate),
-    ]);
+    setRows((prev) => {
+      const base = buildInitialForm(undefined, { defaultType: sharedType }, usdRate);
+      const last = prev[prev.length - 1];
+      const next = last
+        ? {
+            ...base,
+            date: last.date,
+            sourceKind: last.sourceKind,
+            sourceId: last.sourceId,
+          }
+        : base;
+      return [...prev, next];
+    });
   };
 
   const removeRow = (idx: number) => {
@@ -1354,6 +1373,37 @@ function TransactionFormRow({
   const targetWallet = form.targetKind === 'wallet' ? wallets.find((w) => w.id === form.targetId) : undefined;
   const targetAsset  = form.targetKind === 'asset'  ? assets.find((a)  => a.id === form.targetId) : undefined;
   const targetPerson = form.targetKind === 'person' ? persons.find((p) => p.id === form.targetId) : undefined;
+
+  // For non-IRT wallet income/expense, prefill unit price from the wallet
+  // currency rate once if it's empty. This prevents accidental USD-based math
+  // when the user expects TRY/EUR conversion from saved rates.
+  useEffect(() => {
+    if (form.type !== 'INCOME' && form.type !== 'EXPENSE') return;
+    const wallet = form.type === 'INCOME' ? targetWallet : sourceWallet;
+    if (!wallet || wallet.currency === 'IRT') return;
+    const current = Number(form.priceToman);
+    if (Number.isFinite(current) && current > 0) return;
+    const rate = walletRateForTransfer(wallet, currencyRates, usdRate, form.usdRate);
+    if (!(rate > 0)) return;
+    onChange((prev) => {
+      const existing = Number(prev.priceToman);
+      if (Number.isFinite(existing) && existing > 0) return prev;
+      return { ...prev, priceToman: canonicalNumber(rate) };
+    });
+  }, [
+    currencyRates,
+    form.priceToman,
+    form.sourceKind,
+    form.sourceId,
+    form.targetKind,
+    form.targetId,
+    form.type,
+    form.usdRate,
+    onChange,
+    sourceWallet,
+    targetWallet,
+    usdRate,
+  ]);
 
   const srcBalance = sourceBalance(form, wallets, transactions, persons);
   const srcAmountNum = Number(form.sourceAmount);

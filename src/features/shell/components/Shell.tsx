@@ -59,14 +59,14 @@ export function Shell({ children, modal }: ShellProps) {
             </button>
           </div>
 
-          <div className="flex flex-col">
+          <Link href="/" onClick={() => haptic('selection')} className="flex flex-col">
             <h1 className="text-xl font-bold text-transparent bg-clip-text bg-linear-to-l from-purple-400 to-purple-600">
               خرجوک
             </h1>
             <span className="text-[10px] text-slate-500 uppercase tracking-widest">
               مدیریت دارایی
             </span>
-          </div>
+          </Link>
         </header>
 
         <PwaInstallPrompt />

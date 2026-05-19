@@ -32,6 +32,7 @@ import { ListSheetPicker } from '@/shared/components/ListSheetPicker';
 
 type TabKey = 'loans' | 'installments' | 'calendar';
 type InstallmentFilter = 'all' | 'paid' | 'remaining';
+type LoanFilter = 'all' | 'remaining' | 'finished';
 type InstallmentRow = { installment: LoanInstallment; loan: Loan };
 
 const WEEKDAY_LABELS = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'] as const;
@@ -53,7 +54,8 @@ export function LoansHubView() {
   const [settlementTarget, setSettlementTarget] = useState<LoanInstallment | null>(null);
   const [settlementWalletId, setSettlementWalletId] = useState<string | null>(null);
   const [isSettlementPickerOpen, setIsSettlementPickerOpen] = useState(false);
-  const [installmentFilter, setInstallmentFilter] = useState<InstallmentFilter>('all');
+  const [loanFilter, setLoanFilter] = useState<LoanFilter>('remaining');
+  const [installmentFilter, setInstallmentFilter] = useState<InstallmentFilter>('remaining');
   const today = useMemo(() => todayJalaali(), []);
   const todayStr = useMemo(() => formatJalaali(today), [today]);
   const [calendarMonth, setCalendarMonth] = useState<{ jy: number; jm: number }>({
@@ -105,6 +107,13 @@ export function LoansHubView() {
       return { loan, paidCount, totalCount: all.length };
     });
   }, [installments, loans]);
+  const filteredLoanRows = useMemo(() => {
+    if (loanFilter === 'all') return loansRows;
+    if (loanFilter === 'finished') {
+      return loansRows.filter((row) => row.totalCount > 0 && row.paidCount >= row.totalCount);
+    }
+    return loansRows.filter((row) => row.totalCount === 0 || row.paidCount < row.totalCount);
+  }, [loanFilter, loansRows]);
 
   const installmentRows = useMemo<InstallmentRow[]>(() => {
     return installments
@@ -139,6 +148,7 @@ export function LoansHubView() {
       key: string;
       label: string;
       rows: Array<{ installment: LoanInstallment; loan: Loan }>;
+      total: number;
     }>();
     for (const row of filteredInstallmentRows) {
       const parsed = parseJalaali(row.installment.due_date_string);
@@ -151,12 +161,13 @@ export function LoansHubView() {
       const existing = groups.get(key);
       if (existing) {
         existing.rows.push(row);
+        existing.total += displayAmount(row);
       } else {
-        groups.set(key, { key, label, rows: [row] });
+        groups.set(key, { key, label, rows: [row], total: displayAmount(row) });
       }
     }
     return Array.from(groups.values());
-  }, [filteredInstallmentRows]);
+  }, [displayAmount, filteredInstallmentRows]);
 
   const monthKey = `${calendarMonth.jy}/${String(calendarMonth.jm).padStart(2, '0')}`;
   const monthLength = useMemo(
@@ -247,6 +258,10 @@ export function LoansHubView() {
       sublabel: `${CURRENCY_META[wallet.currency].label} · ${wallet.currency}`,
     }));
   }, [wallets]);
+  const selectedSettlementWallet = useMemo(
+    () => wallets.find((wallet) => wallet.id === settlementWalletId) ?? null,
+    [settlementWalletId, wallets]
+  );
 
   const openSettle = (installment: LoanInstallment) => {
     setSettlementTarget(installment);
@@ -424,12 +439,54 @@ export function LoansHubView() {
           </div>
         ) : (
           <div className="space-y-3">
-            {loansRows.map(({ loan, paidCount, totalCount }) => {
+            <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-3">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLoanFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                    loanFilter === 'all'
+                      ? 'bg-purple-600/25 border-purple-500/50 text-purple-200'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                  }`}
+                >
+                  همه
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoanFilter('remaining')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                    loanFilter === 'remaining'
+                      ? 'bg-purple-600/25 border-purple-500/50 text-purple-200'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                  }`}
+                >
+                  باقی‌مانده
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoanFilter('finished')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                    loanFilter === 'finished'
+                      ? 'bg-purple-600/25 border-purple-500/50 text-purple-200'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                  }`}
+                >
+                  تمام‌شده
+                </button>
+              </div>
+            </div>
+            {filteredLoanRows.length === 0 ? (
+              <div className="text-center text-slate-500 text-sm py-6">
+                موردی با این فیلتر وجود ندارد.
+              </div>
+            ) : filteredLoanRows.map(({ loan, paidCount, totalCount }) => {
               const category = loan.category_id
                 ? categories.find((c) => c.id === loan.category_id)
                 : null;
               const totalDisplay =
                 loan.total_amount ?? (loan.installment_amount * loan.repeat_count);
+              const progressPercent = totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0;
               return (
                 <div
                   key={loan.id}
@@ -446,6 +503,19 @@ export function LoansHubView() {
                     <span className="text-[11px] text-slate-400">
                       {paidCount}/{totalCount} تسویه
                     </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">پیشرفت تسویه</span>
+                      <span className="text-slate-300">{toFaDigits(progressPercent)}٪</span>
+                    </div>
+                    <div className="relative h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className="absolute inset-y-0 right-0 rounded-full bg-purple-500 transition-[width] duration-300"
+                        style={{ width: `${progressPercent > 0 ? Math.max(progressPercent, 4) : 0}%` }}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
@@ -494,7 +564,7 @@ export function LoansHubView() {
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-3 space-y-3">
+          <div className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4 space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-400">جمع باقی‌مانده</span>
               <span className="text-sm font-semibold text-slate-100" dir="ltr">
@@ -544,7 +614,12 @@ export function LoansHubView() {
             </div>
           ) : groupedInstallments.map((group) => (
             <div key={group.key} className="space-y-2">
-              <h3 className="text-xs font-bold text-slate-400 px-1">{group.label}</h3>
+              <div className="px-1 flex items-center justify-between gap-3">
+                <h3 className="text-xs font-bold text-slate-400">{group.label}</h3>
+                <span className="text-xs font-semibold text-slate-300" dir="ltr">
+                  {formatCurrency(group.total, currencyMode)}
+                </span>
+              </div>
               {group.rows.map(({ installment, loan }) => {
                 const parsed = parseJalaali(installment.due_date_string);
                 const dueLabel = parsed ? formatJalaaliHuman(parsed) : installment.due_date_string;
@@ -552,7 +627,7 @@ export function LoansHubView() {
                 return (
                   <div
                     key={installment.id}
-                    className="bg-[#1A1B26] border border-white/5 p-4 rounded-2xl flex items-center justify-between gap-3"
+                    className="bg-[#1A1B26] border border-white/5 px-4 py-3.5 rounded-2xl flex items-center justify-between gap-3"
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-slate-100 truncate">{loan.title}</p>
@@ -729,7 +804,7 @@ export function LoansHubView() {
                   در حال تسویه...
                 </span>
               ) : (
-                'ثبت تسویه'
+                selectedSettlementWallet ? `ثبت تسویه با ${selectedSettlementWallet.name}` : 'ثبت تسویه'
               )}
             </button>
             <button
@@ -738,7 +813,7 @@ export function LoansHubView() {
               disabled={isSubmitting}
               className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm disabled:opacity-50"
             >
-              انتخاب کیف پول
+              {selectedSettlementWallet ? selectedSettlementWallet.name : 'انتخاب کیف پول'}
             </button>
             <button
               type="button"

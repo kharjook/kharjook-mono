@@ -254,7 +254,14 @@ export function PortfolioProvider({
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const nextUser = session?.user ?? null;
+      // Tab-focus token refresh can emit auth events with a new user object
+      // reference but the same identity. Ignore those to avoid re-fetching
+      // all initial data unnecessarily.
+      setUser((prev) => {
+        if (prev?.id === nextUser?.id) return prev;
+        return nextUser;
+      });
     });
     return () => subscription.unsubscribe();
   }, []);

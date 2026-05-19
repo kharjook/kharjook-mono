@@ -7,8 +7,8 @@ import {
   AlertCircle,
   CalendarClock,
   DollarSign,
+  RefreshCw,
   Sparkles,
-  Plus,
 } from 'lucide-react';
 import { supabase } from '@/shared/lib/supabase/client';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
@@ -17,7 +17,13 @@ import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import { clampPeriodToToday, currentPeriod } from '@/shared/utils/period';
-import { formatJalaali, formatJalaaliHuman, parseJalaali, todayJalaali } from '@/shared/utils/jalali';
+import {
+  formatJalaali,
+  formatJalaaliHuman,
+  JALALI_MONTHS,
+  parseJalaali,
+  todayJalaali,
+} from '@/shared/utils/jalali';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
 import { effectivePriceAt } from '@/features/reports/utils/price-history';
 import type { Loan, LoanInstallment } from '@/shared/types/domain';
@@ -33,9 +39,12 @@ export function HomeTab() {
     currencyRates,
     dailyPrices,
     isLoadingData,
+    refreshAll,
   } = useData();
   const { currencyMode, usdRate } = useUI();
-  const [upcomingDeadlines, setUpcomingDeadlines] = useState<Array<LoanInstallment & { loanTitle?: string }>>([]);
+  const [upcomingDeadlines, setUpcomingDeadlines] = useState<
+    Array<LoanInstallment & { loanTitle?: string; loanCurrency?: Loan['currency'] }>
+  >([]);
 
   useEffect(() => {
     if (!user) return;
@@ -46,7 +55,7 @@ export function HomeTab() {
         .select('*')
         .eq('is_paid', false)
         .order('due_date_string', { ascending: true })
-        .limit(4);
+        .limit(120);
       if (!mounted) return;
       const installments = ((data ?? []) as LoanInstallment[]);
       if (installments.length === 0) {
@@ -56,14 +65,17 @@ export function HomeTab() {
       const loanIds = Array.from(new Set(installments.map((item) => item.loan_id)));
       const { data: loansData } = await supabase
         .from('loans')
-        .select('id,title')
+        .select('id,title,currency')
         .in('id', loanIds);
       if (!mounted) return;
-      const loanMap = new Map(((loansData ?? []) as Pick<Loan, 'id' | 'title'>[]).map((loan) => [loan.id, loan.title]));
+      const loanMap = new Map(
+        ((loansData ?? []) as Pick<Loan, 'id' | 'title' | 'currency'>[]).map((loan) => [loan.id, loan])
+      );
       setUpcomingDeadlines(
         installments.map((item) => ({
           ...item,
-          loanTitle: loanMap.get(item.loan_id),
+          loanTitle: loanMap.get(item.loan_id)?.title,
+          loanCurrency: loanMap.get(item.loan_id)?.currency,
         }))
       );
     })();
@@ -267,26 +279,56 @@ export function HomeTab() {
       ? valueToman / usdRate
       : valueToman;
 
-  const deadlineRows = upcomingDeadlines.map((item) => {
-    const amount =
-      currencyMode === 'USD' && usdRate > 0
-        ? item.amount / usdRate
-        : item.amount;
-    return {
-      id: item.id,
-      title: item.loanTitle ?? 'بدهی',
-      dueLabel: formatJalaaliHuman(parseJalaali(item.due_date_string) ?? today),
-      amountLabel: formatCurrency(amount, currencyMode),
+  const currentMonthDeadlineSummary = useMemo(() => {
+    const currentMonthKey = `${today.jy}/${String(today.jm).padStart(2, '0')}/`;
+    const currentMonthLabel = `${JALALI_MONTHS[today.jm - 1]} ${String(today.jy).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[Number(c)]!)}`;
+    const toDisplayAmount = (item: LoanInstallment & { loanCurrency?: Loan['currency'] }) => {
+      const rate = tomanPerUnit(item.loanCurrency ?? 'IRT', currencyRates);
+      const toman = item.amount * (rate > 0 ? rate : 0);
+      if (currencyMode === 'USD' && usdRate > 0) {
+        return toman / usdRate;
+      }
+      return toman;
     };
-  });
+    const monthRows = upcomingDeadlines
+      .filter((item) => item.due_date_string.startsWith(currentMonthKey))
+      .map((item) => {
+        const parsed = parseJalaali(item.due_date_string);
+        const displayAmount = toDisplayAmount(item);
+        return {
+        id: item.id,
+        title: item.loanTitle ?? 'بدهی',
+        dueLabel: formatJalaaliHuman(parsed ?? today),
+        amount: displayAmount,
+        amountLabel: formatCurrency(displayAmount, currencyMode),
+      };
+      });
+    return {
+      label: currentMonthLabel,
+      total: monthRows.reduce((sum, row) => sum + row.amount, 0),
+      rows: monthRows,
+    };
+  }, [currencyMode, currencyRates, today, upcomingDeadlines, usdRate]);
 
   return (
     <div className="p-6 space-y-5 animate-in fade-in duration-300">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-white">داشبورد</h2>
-        <span className="text-xs text-slate-500">
-          {isLoadingData ? 'در حال به‌روزرسانی...' : 'به‌روز'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">
+            {isLoadingData ? 'در حال به‌روزرسانی...' : 'به‌روز'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void refreshAll()}
+            disabled={isLoadingData}
+            className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 inline-flex items-center justify-center disabled:opacity-50"
+            aria-label="refresh-prices-and-data"
+            title="بروزرسانی قیمت‌ها"
+          >
+            <RefreshCw size={14} className={isLoadingData ? 'animate-spin' : undefined} />
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -333,17 +375,7 @@ export function HomeTab() {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Link
-          href="/transactions/new"
-          className="bg-[#1A1B26] border border-white/5 rounded-2xl p-4 hover:bg-[#222436] transition-colors"
-        >
-          <div className="flex items-center gap-2 text-slate-300">
-            <Plus size={16} />
-            <span className="text-sm font-medium">شورت‌کات هزینه</span>
-          </div>
-          <p className="text-xs text-slate-500 mt-2">ثبت سریع تراکنش جدید</p>
-        </Link>
+      <div className="grid grid-cols-1 gap-3">
         <button
           type="button"
           onClick={() => router.push('/deadlines')}
@@ -353,21 +385,31 @@ export function HomeTab() {
             <CalendarClock size={16} />
             <span className="text-sm font-medium">سررسید</span>
           </div>
-          {deadlineRows.length === 0 ? (
+          {currentMonthDeadlineSummary.rows.length === 0 ? (
             <p className="text-xs text-slate-500 mt-2">سررسید پرداخت‌نشده‌ای وجود ندارد</p>
           ) : (
             <div className="mt-3 space-y-2">
-              {deadlineRows.map((row) => (
-                <div key={row.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/5 px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="text-xs text-slate-200 truncate">{row.title}</p>
-                    <p className="text-[10px] text-slate-500">{row.dueLabel}</p>
-                  </div>
+              <div className="rounded-xl bg-white/5 px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-slate-200 font-semibold">{currentMonthDeadlineSummary.label}</p>
                   <span className="text-[11px] text-amber-300 shrink-0" dir="ltr">
-                    {row.amountLabel}
+                    {formatCurrency(currentMonthDeadlineSummary.total, currencyMode)}
                   </span>
                 </div>
-              ))}
+                <div className="space-y-1.5">
+                  {currentMonthDeadlineSummary.rows.map((row) => (
+                    <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-2.5 py-1.5">
+                      <div className="min-w-0">
+                        <p className="text-[11px] text-slate-200 truncate">{row.title}</p>
+                        <p className="text-[10px] text-slate-500">{row.dueLabel}</p>
+                      </div>
+                      <span className="text-[11px] text-slate-300 shrink-0" dir="ltr">
+                        {row.amountLabel}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </button>
