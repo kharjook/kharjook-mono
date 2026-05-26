@@ -202,6 +202,29 @@ export function ManageGoalsView() {
     return {
       blocking: issues.length > 0,
       issues,
+      parentSum,
+      childSum,
+      categoryRows: Array.from(
+        new Set([...childSumByCategory.keys(), ...parentByCategory.keys()])
+      )
+        .map((categoryId) => {
+          const parentTarget = parentByCategory.get(categoryId) ?? null;
+          const childrenSum = childSumByCategory.get(categoryId) ?? 0;
+          const categoryName = categoryById.get(categoryId)?.name ?? 'گروه';
+          return {
+            categoryId,
+            categoryName,
+            parentTarget,
+            childrenSum,
+            remainingToParent:
+              parentTarget == null ? null : Math.max(0, parentTarget - childrenSum),
+          };
+        })
+        .sort((a, b) => {
+          const aTarget = a.parentTarget ?? -1;
+          const bTarget = b.parentTarget ?? -1;
+          return bTarget - aTarget;
+        }),
     };
   }, [
     goals,
@@ -541,6 +564,72 @@ export function ManageGoalsView() {
             </div>
           )}
 
+          <div className="rounded-2xl border border-white/10 bg-[#0F1015] p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-300">خلاصه بودجه درصدی</p>
+              <p className="text-[10px] text-slate-500">محاسبه زنده با پیش‌نمایش فرم فعلی</p>
+            </div>
+
+            <BudgetProgressRow
+              label="مجموع هدف‌های گروهی"
+              used={budgetValidation.parentSum}
+              total={100}
+              tone={budgetValidation.parentSum > 100 ? 'danger' : 'normal'}
+            />
+            <BudgetProgressRow
+              label="مجموع هدف‌های دارایی"
+              used={budgetValidation.childSum}
+              total={100}
+              tone={budgetValidation.childSum > 100 ? 'danger' : 'normal'}
+            />
+
+            {budgetValidation.categoryRows.length > 0 && (
+              <div className="space-y-2 pt-1">
+                <p className="text-[11px] text-slate-400">نسبت فرزندها به والد هر گروه</p>
+                {budgetValidation.categoryRows.slice(0, 6).map((row) => (
+                  <div key={row.categoryId} className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-300 truncate">{row.categoryName}</span>
+                      {row.parentTarget == null ? (
+                        <span className="text-amber-300">والد ندارد</span>
+                      ) : (
+                        <span
+                          dir="ltr"
+                          className={
+                            row.childrenSum > row.parentTarget
+                              ? 'text-rose-300'
+                              : 'text-slate-400'
+                          }
+                        >
+                          {row.childrenSum.toFixed(1)} / {row.parentTarget.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                    {row.parentTarget != null && (
+                      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            row.childrenSum > row.parentTarget
+                              ? 'bg-rose-400'
+                              : 'bg-linear-to-r from-purple-500 to-cyan-400'
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              row.parentTarget > 0
+                                ? (row.childrenSum / row.parentTarget) * 100
+                                : 0
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button
             type="submit"
             disabled={!canSubmit}
@@ -602,6 +691,39 @@ export function ManageGoalsView() {
         value={form.categoryId || null}
         onSelect={(id) => setForm((prev) => ({ ...prev, categoryId: id ?? '' }))}
       />
+    </div>
+  );
+}
+
+function BudgetProgressRow({
+  label,
+  used,
+  total,
+  tone,
+}: {
+  label: string;
+  used: number;
+  total: number;
+  tone: 'normal' | 'danger';
+}) {
+  const remaining = Math.max(0, total - used);
+  const width = Math.min(100, total > 0 ? (used / total) * 100 : 0);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-slate-400">{label}</span>
+        <span dir="ltr" className={tone === 'danger' ? 'text-rose-300' : 'text-slate-300'}>
+          {used.toFixed(1)}% used / {remaining.toFixed(1)}% free
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+        <div
+          className={`h-full rounded-full ${
+            tone === 'danger' ? 'bg-rose-400' : 'bg-linear-to-r from-purple-500 to-cyan-400'
+          }`}
+          style={{ width: `${width}%` }}
+        />
+      </div>
     </div>
   );
 }
