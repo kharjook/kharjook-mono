@@ -82,10 +82,10 @@ export const PRICE_SOURCES: readonly PriceSource[] = [
     updatesRate: null,
   },
   {
-    slug: 'abantether.ast_hmbox',
+    slug: 'abantether.ast_brsbox',
     provider: 'abantether',
     label: 'بورس باکس · آبان‌تتر',
-    fetchKey: 'AST_HMBOX',
+    fetchKey: 'AST_BRSBOX',
     updatesRate: null,
   },
   {
