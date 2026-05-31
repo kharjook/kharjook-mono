@@ -81,6 +81,20 @@ export const PRICE_SOURCES: readonly PriceSource[] = [
     fetchKey: 'PAXG',
     updatesRate: null,
   },
+  {
+    slug: 'abantether.ast_hmbox',
+    provider: 'abantether',
+    label: 'بورس باکس · آبان‌تتر',
+    fetchKey: 'AST_HMBOX',
+    updatesRate: null,
+  },
+  {
+    slug: 'abantether.ast_gold',
+    provider: 'abantether',
+    label: 'طلا · آبان‌تتر',
+    fetchKey: 'AST_GOLD',
+    updatesRate: null,
+  },
 	{
     slug: 'zarpay.gold',
     provider: 'zarpay',
