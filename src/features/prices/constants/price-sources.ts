@@ -95,6 +95,20 @@ export const PRICE_SOURCES: readonly PriceSource[] = [
     fetchKey: 'AST_GOLD',
     updatesRate: null,
   },
+  {
+    slug: 'abantether.copxon',
+    provider: 'abantether',
+    label: 'مس · آبان‌تتر',
+    fetchKey: 'COPXON',
+    updatesRate: null,
+  },
+  {
+    slug: 'abantether.slvon',
+    provider: 'abantether',
+    label: 'نقره · آبان‌تتر',
+    fetchKey: 'SLVON',
+    updatesRate: null,
+  },
 	{
     slug: 'zarpay.gold',
     provider: 'zarpay',
