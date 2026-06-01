@@ -88,6 +88,27 @@ body {
   }
 }
 
+@keyframes price-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.price-ticker-track {
+  animation: price-ticker-scroll 36s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .price-ticker-track {
+    animation: none;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+}
+
 
 .ss02 {
 	-moz-font-feature-settings: 'ss02';

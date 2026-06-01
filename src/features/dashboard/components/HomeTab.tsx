@@ -7,7 +7,6 @@ import {
   BarChart3,
   CalendarClock,
   ChevronLeft,
-  DollarSign,
   PieChart,
   RefreshCw,
   Sparkles,
@@ -31,7 +30,14 @@ import {
 } from '@/shared/utils/jalali';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
 import { effectivePriceAt } from '@/features/reports/utils/price-history';
+import { GoalProgressDisplay } from '@/features/goals/components/GoalProgressDisplay';
+import { isGoalMet } from '@/features/goals/utils/goal-progress-display';
+import type { GoalProgress } from '@/features/goals/utils/goal-progress';
 import type { Loan, LoanInstallment } from '@/shared/types/domain';
+import {
+  AssetPriceTicker,
+  type PriceTickerItem,
+} from '@/features/dashboard/components/AssetPriceTicker';
 
 export function HomeTab() {
   const router = useRouter();
@@ -320,10 +326,38 @@ export function HomeTab() {
     yearPeriod,
   ]);
 
-  const usdRateRow = useMemo(
-    () => currencyRates.find((r) => r.currency === 'USD'),
-    [currencyRates]
-  );
+  const priceTickerItems = useMemo((): PriceTickerItem[] => {
+    const items: PriceTickerItem[] = [];
+
+    if (usdRate > 0) {
+      items.push({
+        id: 'usd',
+        label: 'دلار',
+        price: formatCurrency(usdRate, 'TOMAN'),
+        href: '/prices',
+      });
+    }
+
+    for (const asset of assets) {
+      const stats = calculateAssetStats(asset, transactions, currencyMode, usdRate);
+      if (stats.totalAmount <= 0) continue;
+
+      const unitPrice =
+        currencyMode === 'USD'
+          ? Number(asset.price_usd)
+          : Number(asset.price_toman);
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) continue;
+
+      items.push({
+        id: asset.id,
+        label: asset.unit ? `${asset.name} / ${asset.unit}` : asset.name,
+        price: formatCurrency(unitPrice, currencyMode),
+        href: `/assets/${asset.id}`,
+      });
+    }
+
+    return items;
+  }, [assets, transactions, currencyMode, usdRate]);
 
   const displayPortfolio =
     currencyMode === 'USD'
@@ -412,31 +446,15 @@ export function HomeTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_0.8fr] gap-3">
-        <PortfolioHeroCard
-          totalLabel={formatCurrency(displayPortfolio, currencyMode)}
-          assetsLabel={formatCurrency(displayAssets, currencyMode)}
-          cashLabel={formatCurrency(displayCash, currencyMode)}
-          assetShare={assetShare}
-          cashShare={cashShare}
-        />
-        <ExchangeRateCard
-          rateLabel={
-            usdRateRow
-              ? `${Number(usdRateRow.toman_per_unit).toLocaleString('fa-IR')} تومان`
-              : '—'
-          }
-          updatedLabel={
-            usdRateRow?.updated_at
-              ? new Date(usdRateRow.updated_at).toLocaleString('fa-IR', {
-                  dateStyle: 'short',
-                  timeStyle: 'short',
-                })
-              : '—'
-          }
-          onClick={() => router.push('/prices')}
-        />
-      </div>
+      <PortfolioHeroCard
+        totalLabel={formatCurrency(displayPortfolio, currencyMode)}
+        assetsLabel={formatCurrency(displayAssets, currencyMode)}
+        cashLabel={formatCurrency(displayCash, currencyMode)}
+        assetShare={assetShare}
+        cashShare={cashShare}
+      />
+
+      <AssetPriceTicker items={priceTickerItems} />
 
       <div className="grid grid-cols-2 gap-3">
         <button
@@ -718,46 +736,6 @@ function PortfolioSplitPill({
   );
 }
 
-function ExchangeRateCard({
-  rateLabel,
-  updatedLabel,
-  onClick,
-}: {
-  rateLabel: string;
-  updatedLabel: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="relative overflow-hidden rounded-4xl border border-emerald-400/20 bg-linear-to-br from-emerald-500/15 via-teal-500/10 to-[#1A1B26] p-5 text-right w-full hover:border-emerald-400/35 transition-colors"
-    >
-      <div className="absolute -left-10 -top-10 h-32 w-32 rounded-full bg-emerald-400/15 blur-2xl" />
-      <div className="relative">
-        <div className="mb-5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-emerald-300">
-            <DollarSign size={17} />
-            <span className="text-sm font-semibold">قیمت دلار</span>
-          </div>
-          <span className="rounded-full bg-emerald-400/10 px-2.5 py-1 text-[10px] text-emerald-200">
-            نرخ پایه
-          </span>
-        </div>
-        <p className="text-3xl font-black text-white" dir="ltr">
-          {rateLabel}
-        </p>
-        <div className="mt-5 rounded-2xl border border-white/5 bg-[#0F1015]/50 px-3 py-2">
-          <p className="text-[11px] text-slate-500">آخرین به‌روزرسانی</p>
-          <p className="mt-1 text-xs text-slate-300" dir="ltr">
-            {updatedLabel}
-          </p>
-        </div>
-      </div>
-    </button>
-  );
-}
-
 function MetricCard({
   title,
   value,
@@ -850,11 +828,10 @@ function GoalComparisonChartCard({
     targetPercent: number;
   }>;
 }) {
-  const averageCompletion =
-    rows.length > 0
-      ? rows.reduce((sum, row) => sum + (row.targetPercent > 0 ? row.currentPercent / row.targetPercent : 0), 0) /
-        rows.length
-      : 0;
+  const metCount = rows.filter((row) =>
+    isGoalMet(row.currentPercent, row.targetPercent, 'percent')
+  ).length;
+
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-purple-400/15 bg-[#1A1B26] p-4 xl:col-span-1">
       <div className="absolute -right-12 top-8 h-32 w-32 rounded-full bg-purple-500/10 blur-3xl" />
@@ -864,14 +841,16 @@ function GoalComparisonChartCard({
             <Target size={16} />
             <p className="text-sm font-bold">هدف‌ها</p>
           </div>
-          <p className="mt-1 text-[11px] text-slate-500">فعلی در برابر هدف درصدی</p>
+          <p className="mt-1 text-[11px] text-slate-500">وضعیت فعلی در برابر هدف</p>
         </div>
-        <div className="rounded-2xl border border-white/5 bg-white/4 px-3 py-2 text-left">
-          <p className="text-[10px] text-slate-500">میانگین</p>
-          <p className="text-sm font-black text-white" dir="ltr">
-            {(averageCompletion * 100).toFixed(0)}%
-          </p>
-        </div>
+        {rows.length > 0 && (
+          <div className="rounded-2xl border border-white/5 bg-white/4 px-3 py-2 text-left">
+            <p className="text-[10px] text-slate-500">رسیده</p>
+            <p className="text-sm font-black text-white" dir="ltr">
+              {metCount}/{rows.length}
+            </p>
+          </div>
+        )}
       </div>
       {rows.length === 0 ? (
         <div className="relative flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/3 text-xs text-slate-500">
@@ -881,58 +860,36 @@ function GoalComparisonChartCard({
       ) : (
         <div className="relative space-y-4">
           {rows.map((row) => {
-            const scaleMax = Math.max(100, row.currentPercent, row.targetPercent);
-            const currentWidth = Math.min(100, (row.currentPercent / scaleMax) * 100);
-            const targetLeft = Math.min(100, (row.targetPercent / scaleMax) * 100);
-            const delta = row.currentPercent - row.targetPercent;
-            const isAhead = delta >= 0;
+            const progress: GoalProgress = {
+              current: row.currentPercent,
+              target: row.targetPercent,
+              percentComplete:
+                row.targetPercent > 0
+                  ? (row.currentPercent / row.targetPercent) * 100
+                  : 0,
+              remaining: Math.max(0, row.targetPercent - row.currentPercent),
+            };
+
             return (
-              <div key={row.id} className="rounded-2xl border border-white/5 bg-[#0F1015]/45 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-200">{row.name}</p>
-                    <p className="text-[10px] text-slate-500">{row.kindLabel}</p>
-                  </div>
-                  <div className="text-left shrink-0" dir="ltr">
-                    <p
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        isAhead ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'
-                      }`}
-                    >
-                      {delta >= 0 ? '+' : ''}
-                      {delta.toFixed(1)}%
-                    </p>
-                  </div>
+              <div
+                key={row.id}
+                className="rounded-2xl border border-white/5 bg-[#0F1015]/45 p-3 space-y-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-200">
+                    {row.name}
+                  </p>
+                  <p className="text-[10px] text-slate-500">{row.kindLabel}</p>
                 </div>
-                <div className="mt-3">
-                  <div className="relative h-4 rounded-full bg-white/5">
-                    <div
-                      className="h-full rounded-full bg-linear-to-l from-cyan-300 to-purple-500 shadow-lg shadow-purple-500/20"
-                      style={{ width: `${currentWidth}%` }}
-                    />
-                    <div
-                      className="absolute top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.65)]"
-                      style={{ left: `${targetLeft}%` }}
-                    />
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500" dir="ltr">
-                    <span>{row.currentPercent.toFixed(1)}% فعلی</span>
-                    <span>{row.targetPercent.toFixed(1)}% هدف</span>
-                  </div>
-                </div>
+                <GoalProgressDisplay
+                  label=""
+                  kind="percent"
+                  progress={progress}
+                  showIcon={false}
+                />
               </div>
             );
           })}
-          <div className="flex items-center gap-4 rounded-full bg-white/3 px-3 py-2 text-[10px] text-slate-500">
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-linear-to-l from-cyan-300 to-purple-500" />
-              فعلی
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-3 w-0.5 rounded-full bg-white" />
-              هدف
-            </span>
-          </div>
         </div>
       )}
     </div>

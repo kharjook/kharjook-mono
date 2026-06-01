@@ -18,6 +18,8 @@ import {
   calculateAssetGoalProgress,
   totalSnapshotValueToman,
 } from '@/features/goals/utils/goal-progress';
+import { GoalProgressDisplay } from '@/features/goals/components/GoalProgressDisplay';
+import { goalValueKindFromGoal } from '@/features/goals/utils/goal-progress-display';
 import {
   TransactionHistoryTypeFilter,
   type TxHistoryTypeFilter,
@@ -202,11 +204,18 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             </div>
             <div className="space-y-3">
               {assetGoals.map((goal) => (
-                <AssetGoalProgressRow
+                <GoalProgressDisplay
                   key={goal.id}
-                  label={goal.target_kind === 'quantity' ? 'هدف مقداری' : 'هدف درصد سبد'}
-                  currentUnit={goal.target_kind === 'quantity' ? asset.unit : '%'}
-                  progress={calculateAssetGoalProgress(goal, snapshots, totalValueToman)}
+                  label={
+                    goal.target_kind === 'quantity' ? 'هدف مقداری' : 'هدف درصد سبد'
+                  }
+                  kind={goalValueKindFromGoal(goal.target_kind)}
+                  unit={asset.unit}
+                  progress={calculateAssetGoalProgress(
+                    goal,
+                    snapshots,
+                    totalValueToman
+                  )}
                 />
               ))}
             </div>
@@ -349,43 +358,6 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
         <Plus size={20} />
         ثبت عملیات جدید
       </button>
-    </div>
-  );
-}
-
-function AssetGoalProgressRow({
-  label,
-  currentUnit,
-  progress,
-}: {
-  label: string;
-  currentUnit: string;
-  progress: { current: number; target: number; percentComplete: number; remaining: number } | null;
-}) {
-  const width = Math.min(100, progress?.percentComplete ?? 0);
-  const formatValue = (value: number) =>
-    currentUnit === '%'
-      ? `${value.toFixed(1)}%`
-      : `${value.toLocaleString('en-US')} ${currentUnit}`;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-slate-400">{label}</span>
-        <span className="text-xs text-slate-300" dir="ltr">
-          {formatValue(progress?.current ?? 0)} / {formatValue(progress?.target ?? 0)}
-        </span>
-      </div>
-      <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-        <div
-          className="h-full rounded-full bg-linear-to-r from-purple-500 to-cyan-400"
-          style={{ width: `${width}%` }}
-        />
-      </div>
-      <div className="flex items-center justify-between text-[11px] text-slate-500" dir="ltr">
-        <span>{(progress?.percentComplete ?? 0).toFixed(1)}%</span>
-        <span>{formatValue(progress?.remaining ?? 0)} remaining</span>
-      </div>
     </div>
   );
 }

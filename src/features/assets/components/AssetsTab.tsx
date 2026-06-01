@@ -15,6 +15,8 @@ import {
   calculateGroupGoalProgress,
   totalSnapshotValueToman,
 } from '@/features/goals/utils/goal-progress';
+import { GoalProgressDisplay } from '@/features/goals/components/GoalProgressDisplay';
+import { goalValueKindFromGoal } from '@/features/goals/utils/goal-progress-display';
 
 export function AssetsTab() {
   const router = useRouter();
@@ -147,8 +149,10 @@ export function AssetsTab() {
                   </h3>
                 </div>
                 {group.id !== 'uncategorized' && groupGoalByCategory.has(group.id) && (
-                  <GoalMiniProgress
+                  <GoalProgressDisplay
                     label="هدف گروه"
+                    kind="percent"
+                    variant="compact"
                     progress={calculateGroupGoalProgress(
                       groupGoalByCategory.get(group.id)!,
                       snapshots,
@@ -211,13 +215,16 @@ export function AssetsTab() {
                         {assetGoals.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {assetGoals.slice(0, 2).map((goal) => (
-                              <GoalMiniProgress
+                              <GoalProgressDisplay
                                 key={goal.id}
                                 label={
                                   goal.target_kind === 'quantity'
                                     ? 'هدف مقدار'
                                     : 'هدف درصد سبد'
                                 }
+                                kind={goalValueKindFromGoal(goal.target_kind)}
+                                unit={asset.unit}
+                                variant="compact"
                                 progress={calculateAssetGoalProgress(
                                   goal,
                                   snapshots,
@@ -249,35 +256,6 @@ export function AssetsTab() {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function GoalMiniProgress({
-  label,
-  progress,
-}: {
-  label: string;
-  progress: { percentComplete: number; current: number; target: number } | null;
-}) {
-  const width = Math.min(100, progress?.percentComplete ?? 0);
-  return (
-    <div className="min-w-36 space-y-1">
-      <div className="flex items-center justify-between gap-2 text-[10px]">
-        <span className="inline-flex items-center gap-1 text-purple-300">
-          <Target size={10} />
-          {label}
-        </span>
-        <span className="text-slate-500" dir="ltr">
-          {(progress?.percentComplete ?? 0).toFixed(0)}%
-        </span>
-      </div>
-      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-        <div
-          className="h-full rounded-full bg-linear-to-l from-purple-500 to-cyan-400"
-          style={{ width: `${width}%` }}
-        />
-      </div>
     </div>
   );
 }
