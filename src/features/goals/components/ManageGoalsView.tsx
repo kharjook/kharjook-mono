@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import {
   Activity,
   ArrowRight,
-  Check,
   ChevronDown,
   Edit3,
   Folder,
@@ -30,7 +29,10 @@ import {
   calculateAssetGoalProgress,
   calculateGroupGoalProgress,
   totalSnapshotValueToman,
+  type GoalProgress,
 } from '@/features/goals/utils/goal-progress';
+import { GoalProgressDisplay } from '@/features/goals/components/GoalProgressDisplay';
+import { goalValueKindFromGoal } from '@/features/goals/utils/goal-progress-display';
 
 type FormState = {
   editingId: string | null;
@@ -656,6 +658,7 @@ export function ManageGoalsView() {
                   key={goal.id}
                   goal={goal}
                   assetName={goal.asset_id ? assetById.get(goal.asset_id)?.name : undefined}
+                  assetUnit={goal.asset_id ? assetById.get(goal.asset_id)?.unit : undefined}
                   categoryName={
                     goal.category_id ? categoryById.get(goal.category_id)?.name : undefined
                   }
@@ -789,6 +792,7 @@ function TargetKindButton({
 function GoalRow({
   goal,
   assetName,
+  assetUnit,
   categoryName,
   pending,
   progress,
@@ -797,22 +801,15 @@ function GoalRow({
 }: {
   goal: Goal;
   assetName?: string;
+  assetUnit?: string;
   categoryName?: string;
   pending: boolean;
-  progress: { percentComplete: number; current: number; target: number } | null;
+  progress: GoalProgress | null;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const name = goal.scope === 'asset' ? (assetName ?? 'دارایی حذف‌شده') : (categoryName ?? 'گروه حذف‌شده');
-  const target =
-    goal.target_kind === 'quantity'
-      ? Number(goal.target_quantity ?? 0).toLocaleString('en-US')
-      : `${Number(goal.target_percent ?? 0).toFixed(1)}%`;
-  const current =
-    goal.target_kind === 'quantity'
-      ? Number(progress?.current ?? 0).toLocaleString('en-US')
-      : `${Number(progress?.current ?? 0).toFixed(1)}%`;
-  const width = Math.min(100, progress?.percentComplete ?? 0);
+  const kind = goalValueKindFromGoal(goal.target_kind);
 
   return (
     <div
@@ -854,22 +851,13 @@ function GoalRow({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-xs" dir="ltr">
-          <span className="text-slate-400">{current}</span>
-          <span className="text-slate-300">{target}</span>
-        </div>
-        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-linear-to-r from-purple-500 to-cyan-400"
-            style={{ width: `${width}%` }}
-          />
-        </div>
-        <div className="flex items-center gap-1 text-[11px] text-slate-500" dir="ltr">
-          <Check size={11} />
-          {(progress?.percentComplete ?? 0).toFixed(1)}%
-        </div>
-      </div>
+      <GoalProgressDisplay
+        label=""
+        kind={kind}
+        unit={assetUnit ?? ''}
+        progress={progress}
+        showIcon={false}
+      />
     </div>
   );
 }
