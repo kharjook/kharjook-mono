@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, LogOut, User as UserIcon } from 'lucide-react';
 import { useAuth } from '@/features/portfolio/PortfolioProvider';
 import { latinizeDigits } from '@/shared/utils/latinize-digits';
+import { TelegramConnectionSection } from '@/features/settings/components/TelegramConnectionSection';
+import { NotificationSettingsSection } from '@/features/settings/components/NotificationSettingsSection';
 
 export function SettingsTab() {
   const router = useRouter();
@@ -44,6 +46,9 @@ export function SettingsTab() {
             </p>
           </div>
         </div>
+
+        <TelegramConnectionSection />
+        <NotificationSettingsSection />
 
         <button
           onClick={handleLogout}

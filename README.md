@@ -29,6 +29,19 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
+## Telegram notifications
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and set env vars (see [`.env.example`](.env.example)):
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_WEBHOOK_SECRET` (optional, recommended)
+   - `CRON_SECRET` (Vercel Cron auth)
+   - `SUPABASE_SERVICE_ROLE_KEY` (cron + webhook only)
+2. Apply migration [`supabase/migrations/20250603120000_telegram_notifications.sql`](supabase/migrations/20250603120000_telegram_notifications.sql).
+3. Deploy to Vercel and set webhook URL to `https://YOUR_DOMAIN/api/telegram/webhook`.
+4. In app **Settings**, connect Telegram and configure report schedule.
+
+Cron runs hourly via [`vercel.json`](vercel.json) and sends reports/reminders when each user's local time matches their settings.
+
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
