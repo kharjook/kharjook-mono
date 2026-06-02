@@ -32,7 +32,12 @@ import {
 } from '@/shared/utils/jalali';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
 import { effectivePriceAt } from '@/features/reports/utils/price-history';
-import { computeGoalDelta, isGoalMet } from '@/features/goals/utils/goal-progress-display';
+import { buildGoalBuySuggestion } from '@/features/goals/utils/goal-action-suggestion';
+import {
+  computeGoalDelta,
+  isGoalMet,
+  type GoalValueKind,
+} from '@/features/goals/utils/goal-progress-display';
 import type { Loan, LoanInstallment } from '@/shared/types/domain';
 import {
   AssetPriceTicker,
@@ -42,6 +47,17 @@ import { MonthlyCashflowChart } from '@/features/dashboard/components/MonthlyCas
 import { TopAllocationCard } from '@/features/dashboard/components/TopAllocationCard';
 import { DistributionChartCard } from '@/features/dashboard/components/DistributionChartCard';
 import { buildYearCashflowByMonth } from '@/features/dashboard/utils/year-cashflow';
+
+export type HomeGoalRow = {
+  id: string;
+  name: string;
+  kindLabel: string;
+  valueKind: GoalValueKind;
+  currentValue: number;
+  targetValue: number;
+  unit?: string;
+  buySuggestion: string | null;
+};
 
 export function HomeTab() {
   const router = useRouter();
@@ -244,46 +260,97 @@ export function HomeTab() {
 
     subDistribution.sort((a, b) => b.valueToman - a.valueToman);
 
-    const goalComparison = goals
-      .filter((goal) => goal.target_kind === 'allocation_percent')
+    const goalComparison: HomeGoalRow[] = goals
       .map((goal) => {
-        const targetPercent = Number(goal.target_percent ?? 0);
-        if (!Number.isFinite(targetPercent) || targetPercent <= 0) return null;
-        if (goal.scope === 'asset') {
+        if (goal.target_kind === 'quantity') {
+          if (goal.scope !== 'asset') return null;
           const asset = goal.asset_id ? assets.find((a) => a.id === goal.asset_id) : null;
           if (!asset) return null;
-          const currentValue = assetValueById.get(asset.id) ?? 0;
+          const targetValue = Number(goal.target_quantity ?? 0);
+          if (!Number.isFinite(targetValue) || targetValue <= 0) return null;
+          const assetStats = calculateAssetStats(
+            asset,
+            transactions,
+            currencyMode,
+            usdRate
+          );
+          const currentValue = assetStats.totalAmount;
           return {
             id: goal.id,
             name: asset.name,
             kindLabel: 'دارایی',
-            currentPercent:
-              assetsValueToman > 0 ? (currentValue / assetsValueToman) * 100 : 0,
-            targetPercent,
+            valueKind: 'quantity' as const,
+            currentValue,
+            targetValue,
+            unit: asset.unit,
+            buySuggestion: buildGoalBuySuggestion({
+              name: asset.name,
+              kind: 'quantity',
+              current: currentValue,
+              target: targetValue,
+              unit: asset.unit,
+              decimalPlaces: asset.decimal_places,
+            }),
+          };
+        }
+
+        const targetValue = Number(goal.target_percent ?? 0);
+        if (!Number.isFinite(targetValue) || targetValue <= 0) return null;
+        if (goal.scope === 'asset') {
+          const asset = goal.asset_id ? assets.find((a) => a.id === goal.asset_id) : null;
+          if (!asset) return null;
+          const currentValueToman = assetValueById.get(asset.id) ?? 0;
+          const currentPercent =
+            assetsValueToman > 0 ? (currentValueToman / assetsValueToman) * 100 : 0;
+          return {
+            id: goal.id,
+            name: asset.name,
+            kindLabel: 'دارایی',
+            valueKind: 'percent' as const,
+            currentValue: currentPercent,
+            targetValue,
+            unit: asset.unit,
+            buySuggestion: buildGoalBuySuggestion({
+              name: asset.name,
+              kind: 'percent',
+              current: currentPercent,
+              target: targetValue,
+              currentValueToman,
+              portfolioValueToman: assetsValueToman,
+              priceToman: asset.price_toman,
+              unit: asset.unit,
+              decimalPlaces: asset.decimal_places,
+              currencyMode,
+              usdRate,
+            }),
           };
         }
         const category = goal.category_id ? categoryById.get(goal.category_id) : null;
         if (!category) return null;
-        const currentValue = mainDistributionMap.get(category.id) ?? 0;
+        const groupValueToman = mainDistributionMap.get(category.id) ?? 0;
+        const currentPercent =
+          assetsValueToman > 0 ? (groupValueToman / assetsValueToman) * 100 : 0;
         return {
           id: goal.id,
           name: category.name,
           kindLabel: 'گروه',
-          currentPercent:
-            assetsValueToman > 0 ? (currentValue / assetsValueToman) * 100 : 0,
-          targetPercent,
+          valueKind: 'percent' as const,
+          currentValue: currentPercent,
+          targetValue,
+          buySuggestion: buildGoalBuySuggestion({
+            name: category.name,
+            kind: 'percent',
+            current: currentPercent,
+            target: targetValue,
+            currentValueToman: groupValueToman,
+            portfolioValueToman: assetsValueToman,
+            currencyMode,
+            usdRate,
+          }),
         };
       })
-      .filter(
-        (row): row is {
-          id: string;
-          name: string;
-          kindLabel: string;
-          currentPercent: number;
-          targetPercent: number;
-        } => row !== null
-      )
-      .sort((a, b) => b.targetPercent - a.targetPercent);
+      .filter((row): row is HomeGoalRow => row !== null)
+      .sort((a, b) => b.targetValue - a.targetValue);
 
     const buildMaxExpense = (byCategory: Map<string, number>) => {
       const maxEntry = Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1])[0];
@@ -382,12 +449,12 @@ export function HomeTab() {
 
   const sortedGoalRows = useMemo(() => {
     return [...stats.goalComparison].sort((a, b) => {
-      const metA = isGoalMet(a.currentPercent, a.targetPercent, 'percent');
-      const metB = isGoalMet(b.currentPercent, b.targetPercent, 'percent');
+      const metA = isGoalMet(a.currentValue, a.targetValue, a.valueKind);
+      const metB = isGoalMet(b.currentValue, b.targetValue, b.valueKind);
       if (metA !== metB) return metA ? 1 : -1;
       return (
-        Math.abs(b.currentPercent - b.targetPercent) -
-        Math.abs(a.currentPercent - a.targetPercent)
+        Math.abs(b.currentValue - b.targetValue) -
+        Math.abs(a.currentValue - a.targetValue)
       );
     });
   }, [stats.goalComparison]);
@@ -868,23 +935,23 @@ function HomeGoalsSection({
   rows,
   onManage,
 }: {
-  rows: Array<{
-    id: string;
-    name: string;
-    kindLabel: string;
-    currentPercent: number;
-    targetPercent: number;
-  }>;
+  rows: HomeGoalRow[];
   onManage: () => void;
 }) {
   const metCount = rows.filter((row) =>
-    isGoalMet(row.currentPercent, row.targetPercent, 'percent')
+    isGoalMet(row.currentValue, row.targetValue, row.valueKind)
   ).length;
   const pendingCount = rows.length - metCount;
+  const buySuggestions = rows.filter((row) => row.buySuggestion);
   const maxValue = Math.max(
     1,
-    ...rows.flatMap((row) => [row.currentPercent, row.targetPercent])
+    ...rows.flatMap((row) => [row.currentValue, row.targetValue])
   );
+
+  const formatGoalAxisValue = (row: HomeGoalRow, value: number) =>
+    row.valueKind === 'percent'
+      ? `${value.toFixed(1)}%`
+      : `${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}${row.unit ? ` ${row.unit}` : ''}`;
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-purple-400/15 bg-[#1A1B26] p-4">
@@ -899,7 +966,7 @@ function HomeGoalsSection({
           <p className="mt-1 text-[11px] text-slate-500">
             {rows.length > 0
               ? `${metCount.toLocaleString('fa-IR')} از ${rows.length.toLocaleString('fa-IR')} رسیده`
-              : 'هدف درصدی تعریف نشده'}
+              : 'هدفی تعریف نشده'}
           </p>
         </div>
         <button
@@ -942,18 +1009,19 @@ function HomeGoalsSection({
 
           <div className="relative flex h-36 items-end gap-1.5 sm:gap-2" dir="ltr">
             {rows.map((row) => {
-              const currentH = (row.currentPercent / maxValue) * 100;
-              const targetH = (row.targetPercent / maxValue) * 100;
+              const currentH = (row.currentValue / maxValue) * 100;
+              const targetH = (row.targetValue / maxValue) * 100;
               const progress = {
-                current: row.currentPercent,
-                target: row.targetPercent,
+                current: row.currentValue,
+                target: row.targetValue,
                 percentComplete:
-                  row.targetPercent > 0
-                    ? (row.currentPercent / row.targetPercent) * 100
+                  row.targetValue > 0
+                    ? (row.currentValue / row.targetValue) * 100
                     : 0,
-                remaining: Math.max(0, row.targetPercent - row.currentPercent),
+                remaining: Math.max(0, row.targetValue - row.currentValue),
               };
-              const status = computeGoalDelta(progress, 'percent', '%').status;
+              const valueUnit = row.valueKind === 'percent' ? '%' : row.unit ?? '';
+              const status = computeGoalDelta(progress, row.valueKind, valueUnit).status;
               const currentBarClass =
                 status === 'under' ? 'bg-rose-500/85' : 'bg-emerald-500/85';
 
@@ -966,16 +1034,16 @@ function HomeGoalsSection({
                     <div
                       className={`w-[42%] max-w-5 rounded-t-md transition-all ${currentBarClass}`}
                       style={{
-                        height: `${Math.max(row.currentPercent > 0 ? 4 : 0, currentH)}%`,
+                        height: `${Math.max(row.currentValue > 0 ? 4 : 0, currentH)}%`,
                       }}
-                      title={`${row.name} · فعلی: ${row.currentPercent.toFixed(1)}% (${row.kindLabel})`}
+                      title={`${row.name} · فعلی: ${formatGoalAxisValue(row, row.currentValue)} (${row.kindLabel})`}
                     />
                     <div
                       className="w-[42%] max-w-5 rounded-t-md bg-white/20 transition-all"
                       style={{
-                        height: `${Math.max(row.targetPercent > 0 ? 4 : 0, targetH)}%`,
+                        height: `${Math.max(row.targetValue > 0 ? 4 : 0, targetH)}%`,
                       }}
-                      title={`${row.name} · هدف: ${row.targetPercent.toFixed(1)}% (${row.kindLabel})`}
+                      title={`${row.name} · هدف: ${formatGoalAxisValue(row, row.targetValue)} (${row.kindLabel})`}
                     />
                   </div>
                   <span
@@ -1003,6 +1071,19 @@ function HomeGoalsSection({
               هدف
             </span>
           </div>
+
+          {buySuggestions.length > 0 && (
+            <div className="relative mt-4 space-y-2 rounded-xl border border-purple-400/10 bg-purple-500/5 px-3 py-2.5">
+              <p className="text-[10px] font-semibold text-purple-300">پیشنهاد خرید</p>
+              <ul className="space-y-1.5">
+                {buySuggestions.map((row) => (
+                  <li key={row.id} className="text-[10px] leading-relaxed text-slate-300">
+                    {row.buySuggestion}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       )}
     </div>

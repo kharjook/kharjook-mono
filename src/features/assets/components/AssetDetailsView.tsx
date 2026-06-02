@@ -19,6 +19,7 @@ import {
   totalSnapshotValueToman,
 } from '@/features/goals/utils/goal-progress';
 import { GoalProgressDisplay } from '@/features/goals/components/GoalProgressDisplay';
+import { buildGoalActionSuggestion } from '@/features/goals/utils/goal-action-suggestion';
 import { goalValueKindFromGoal } from '@/features/goals/utils/goal-progress-display';
 import {
   TransactionHistoryTypeFilter,
@@ -70,6 +71,40 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
     () => goals.filter((goal) => goal.scope === 'asset' && goal.asset_id === assetId),
     [goals, assetId]
   );
+  const assetGoalSuggestions = useMemo(() => {
+    if (!asset) return [];
+    const snapshot = snapshots.find((row) => row.asset.id === asset.id);
+    const currentValueToman = snapshot?.valueToman ?? 0;
+    const currentQuantity = snapshot?.quantity ?? 0;
+
+    return assetGoals
+      .map((goal) => {
+        const progress = calculateAssetGoalProgress(goal, snapshots, totalValueToman);
+        if (!progress) return null;
+        const kind = goalValueKindFromGoal(goal.target_kind);
+        const suggestion = buildGoalActionSuggestion({
+          name: asset.name,
+          kind,
+          current: progress.current,
+          target: progress.target,
+          unit: asset.unit,
+          decimalPlaces: asset.decimal_places,
+          currentValueToman,
+          portfolioValueToman: totalValueToman,
+          priceToman: asset.price_toman,
+          currencyMode,
+          usdRate,
+          maxQuantity: currentQuantity,
+          allowSell: true,
+        });
+        if (!suggestion) return null;
+        return { goalId: goal.id, ...suggestion };
+      })
+      .filter(
+        (row): row is { goalId: string; action: 'buy' | 'sell'; message: string } =>
+          row !== null
+      );
+  }, [asset, assetGoals, snapshots, totalValueToman, currencyMode, usdRate]);
 
   if (!asset) {
     return (
@@ -219,6 +254,23 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
                 />
               ))}
             </div>
+            {assetGoalSuggestions.length > 0 && (
+              <div className="space-y-2 rounded-xl border border-purple-400/10 bg-purple-500/5 px-3 py-2.5">
+                <p className="text-[10px] font-semibold text-purple-300">پیشنهاد</p>
+                <ul className="space-y-1.5">
+                  {assetGoalSuggestions.map((item) => (
+                    <li
+                      key={item.goalId}
+                      className={`text-[10px] leading-relaxed ${
+                        item.action === 'buy' ? 'text-emerald-300' : 'text-rose-300'
+                      }`}
+                    >
+                      {item.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
