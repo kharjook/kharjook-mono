@@ -7,14 +7,15 @@ export type TelegramReplyMarkup = {
   input_field_placeholder?: string;
 };
 
-export type TelegramInlineButton = {
-  text: string;
-  callback_data: string;
-};
+export type TelegramInlineButton =
+  | { text: string; callback_data: string }
+  | { text: string; copy_text: { text: string } };
 
 export type TelegramInlineMarkup = {
   inline_keyboard: TelegramInlineButton[][];
 };
+
+export type TelegramParseMode = 'HTML' | 'Markdown' | 'MarkdownV2';
 
 export class TelegramSendError extends Error {
   constructor(
@@ -40,12 +41,14 @@ async function telegramPost(method: string, body: Record<string, unknown>): Prom
 export async function sendTelegramMessage(
   chatId: number,
   text: string,
-  replyMarkup?: TelegramReplyMarkup
+  replyMarkup?: TelegramReplyMarkup,
+  options?: { parse_mode?: TelegramParseMode }
 ): Promise<void> {
   const res = await telegramPost('sendMessage', {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
+    ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
 
@@ -66,12 +69,14 @@ export async function sendTelegramMessage(
 export async function sendTelegramInlineMessage(
   chatId: number,
   text: string,
-  inlineMarkup: TelegramInlineMarkup
+  inlineMarkup: TelegramInlineMarkup,
+  options?: { parse_mode?: TelegramParseMode }
 ): Promise<number | null> {
   const res = await telegramPost('sendMessage', {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
+    ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
     reply_markup: inlineMarkup,
   });
 

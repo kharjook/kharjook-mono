@@ -18,6 +18,7 @@ export const BTN_PORTFOLIO = '💼 ارزش پرتفوی';
 export const BTN_MONTH_DEBTS = '📅 اقساط این ماه';
 export const BTN_OVERDUE_DEBTS = '🔴 اقساط معوق';
 export const BTN_WALLET_BALANCES = '💳 موجودی کیف‌ها';
+export const BTN_WALLET_PAYMENT_INFO = '🏦 اطلاعات حساب';
 
 /** Prices submenu */
 export const BTN_UPDATE_PRICES = '🔄 بروزرسانی قیمت‌ها';
@@ -43,6 +44,7 @@ export const ALL_BOT_BUTTONS = new Set([
   BTN_MONTH_DEBTS,
   BTN_OVERDUE_DEBTS,
   BTN_WALLET_BALANCES,
+  BTN_WALLET_PAYMENT_INFO,
   BTN_UPDATE_PRICES,
   BTN_GET_PRICES,
   BTN_QA_INCOME,
@@ -86,6 +88,7 @@ export function buildReportsReplyKeyboard(): TelegramReplyMarkup {
     keyboard: [
       [{ text: BTN_PORTFOLIO }, { text: BTN_WALLET_BALANCES }],
       [{ text: BTN_MONTH_DEBTS }, { text: BTN_OVERDUE_DEBTS }],
+      [{ text: BTN_WALLET_PAYMENT_INFO }],
       [{ text: BTN_BACK }],
     ],
     resize_keyboard: true,

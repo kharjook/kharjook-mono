@@ -8,6 +8,7 @@ import {
   sendTodayCashflowForUser,
   sendWalletBalancesForUser,
 } from '@/features/notifications/services/dispatch-notifications';
+import { sendWalletPaymentInfoPicker } from '@/features/notifications/services/bot-wallet-info';
 import {
   loadBotNotificationSettings,
   updateBotNotificationSettings,
@@ -47,6 +48,7 @@ import {
   BTN_QUICK_ADD,
   BTN_UPDATE_PRICES,
   BTN_WALLET_BALANCES,
+  BTN_WALLET_PAYMENT_INFO,
   buildMainReplyKeyboard,
   buildSettingsReplyKeyboard,
 } from '@/features/notifications/telegram/telegram-keyboard';
@@ -217,6 +219,15 @@ export async function handleBotMessage(chatId: number, text: string): Promise<vo
   if (text === BTN_WALLET_BALANCES) {
     await runReportAction(chatId, async (userId, conn) => {
       await sendWalletBalancesForUser(userId, conn, { replyMarkup: keyboardForMenu('reports') });
+    });
+    return;
+  }
+
+  if (text === BTN_WALLET_PAYMENT_INFO) {
+    await runReportAction(chatId, async (_userId, conn) => {
+      await sendWalletPaymentInfoPicker(conn, {
+        replyMarkup: keyboardForMenu('reports'),
+      });
     });
     return;
   }

@@ -3,16 +3,17 @@ import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
 import type { TelegramConnection, Wallet } from '@/shared/types/domain';
 import { clearBotFlow, getConnectionByChatId, setBotFlow } from '@/features/notifications/telegram/bot-nav';
 import { handleQuickAddCallback } from '@/features/notifications/telegram/bot-quick-add';
-import {
-  MSG_SETTLE_ALREADY,
-  MSG_SETTLE_OK,
-} from '@/features/notifications/telegram/utils/telegram-copy';
+import { handleWalletInfoCallback } from '@/features/notifications/services/bot-wallet-info';
 import {
   answerTelegramCallback,
   editTelegramMessage,
   sendTelegramInlineMessage,
   type TelegramInlineMarkup,
 } from '@/features/notifications/telegram/utils/telegram-client';
+import {
+  MSG_SETTLE_ALREADY,
+  MSG_SETTLE_OK,
+} from '@/features/notifications/telegram/utils/telegram-copy';
 
 type PayInstallmentFlow = {
   type: 'pay_installment';
@@ -171,6 +172,13 @@ export async function handleBotCallback(input: {
     if (!fresh) return;
     const index = Number(data.slice(3));
     await handlePayWalletPick(chatId, fresh, index, callbackQueryId, messageId);
+    return;
+  }
+
+  if (data.startsWith('wi:')) {
+    const walletId = data.slice(3);
+    await answerTelegramCallback(callbackQueryId);
+    await handleWalletInfoCallback(connection, walletId);
     return;
   }
 
