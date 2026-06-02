@@ -27,7 +27,7 @@ export function formatPricesListMessage(assets: Asset[], usdRate: number): strin
       TELEGRAM_SEPARATOR,
       `📅 ${dateLine}`,
       '',
-      'دارایی فعالی برای نمایش قیمت ندارید.',
+      'دارایی با موجودی فعال برای نمایش قیمت ندارید.',
       TELEGRAM_SEPARATOR,
     ].join('\n');
   }
