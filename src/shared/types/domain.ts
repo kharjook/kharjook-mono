@@ -73,6 +73,11 @@ export interface Wallet {
   initial_balance: number;
   icon_url: string | null;
   archived_at: string | null;
+  /** Optional payment destination — digits only when stored. */
+  card_number?: string | null;
+  account_number?: string | null;
+  /** Optional Sheba / IBAN — stored uppercase without spaces. */
+  iban?: string | null;
   order_index?: number;
   created_at: string;
 }

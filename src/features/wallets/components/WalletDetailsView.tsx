@@ -7,6 +7,7 @@ import {
   ArrowLeftRight,
   ArrowRight,
   ArrowUpRight,
+  CreditCard,
   Edit3,
   Plus,
   Trash2,
@@ -32,6 +33,13 @@ import {
   transactionIdsInConvertGroups,
   type ConvertTransactionGroup,
 } from '@/features/transactions/utils/convert-transaction';
+import { CopyableDetailRow } from '@/features/wallets/components/CopyableDetailRow';
+import { WalletPaymentDetailsSheet } from '@/features/wallets/components/WalletPaymentDetailsSheet';
+import {
+  formatCardNumber,
+  formatIban,
+  walletHasPaymentDetails,
+} from '@/features/wallets/utils/wallet-payment-details';
 import {
   TransactionHistoryTypeFilter,
   type TxHistoryTypeFilter,
@@ -58,10 +66,12 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
     categories,
     transactions,
     setTransactions,
+    setWallets,
     currencyRates,
   } = useData();
   const { currencyMode, usdRate } = useUI();
   const [txTypeFilter, setTxTypeFilter] = useState<TxHistoryTypeFilter>('ALL');
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
 
   const wallet = wallets.find((w) => w.id === walletId);
 
@@ -128,6 +138,12 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
     currencyMode === 'USD' && usdRate > 0
       ? balanceToman / usdRate
       : balanceToman;
+
+  const hasPaymentDetails = walletHasPaymentDetails(wallet);
+
+  const updateWallet = (next: Wallet) => {
+    setWallets((prev) => prev.map((w) => (w.id === next.id ? next : w)));
+  };
 
   const deleteTx = async (id: string) => {
     if (!window.confirm('آیا از حذف این تراکنش مطمئن هستید؟')) return;
@@ -215,6 +231,52 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
           />
         </div>
 
+        <div className="bg-[#1A1B26] rounded-2xl border border-white/5 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <CreditCard size={16} className="text-purple-300 shrink-0" />
+              <h3 className="text-sm font-semibold text-white">اطلاعات حساب</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPaymentSheetOpen(true)}
+              className="shrink-0 text-xs font-medium text-purple-300 hover:text-purple-200 transition-colors"
+            >
+              {hasPaymentDetails ? 'ویرایش' : 'افزودن'}
+            </button>
+          </div>
+
+          {hasPaymentDetails ? (
+            <div className="space-y-2">
+              {wallet.card_number && (
+                <CopyableDetailRow
+                  label="شماره کارت"
+                  value={formatCardNumber(wallet.card_number)}
+                  copyValue={wallet.card_number}
+                />
+              )}
+              {wallet.account_number && (
+                <CopyableDetailRow
+                  label="شماره حساب"
+                  value={wallet.account_number}
+                  copyValue={wallet.account_number}
+                />
+              )}
+              {wallet.iban && (
+                <CopyableDetailRow
+                  label="شبا"
+                  value={formatIban(wallet.iban)}
+                  copyValue={wallet.iban}
+                />
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500 leading-relaxed">
+              شماره کارت، حساب یا شبا را اضافه کنید تا با یک لمس کپی شود.
+            </p>
+          )}
+        </div>
+
         <div className="pt-2">
           <h3 className="text-lg font-semibold text-white mb-3">تاریخچه تراکنش‌ها</h3>
           {stats.transactions.length > 0 && (
@@ -267,6 +329,13 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
           </div>
         </div>
       </div>
+
+      <WalletPaymentDetailsSheet
+        open={paymentSheetOpen}
+        onClose={() => setPaymentSheetOpen(false)}
+        wallet={wallet}
+        onSaved={updateWallet}
+      />
 
       <button
         type="button"
