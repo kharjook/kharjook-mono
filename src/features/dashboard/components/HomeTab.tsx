@@ -6,7 +6,9 @@ import {
   AlertCircle,
   BarChart3,
   CalendarClock,
+  CheckCircle2,
   ChevronLeft,
+  CircleDashed,
   PieChart,
   RefreshCw,
   Sparkles,
@@ -30,9 +32,7 @@ import {
 } from '@/shared/utils/jalali';
 import { calculateAssetPeriodStats } from '@/features/reports/utils/asset-period-stats';
 import { effectivePriceAt } from '@/features/reports/utils/price-history';
-import { GoalProgressDisplay } from '@/features/goals/components/GoalProgressDisplay';
-import { isGoalMet } from '@/features/goals/utils/goal-progress-display';
-import type { GoalProgress } from '@/features/goals/utils/goal-progress';
+import { computeGoalDelta, isGoalMet } from '@/features/goals/utils/goal-progress-display';
 import type { Loan, LoanInstallment } from '@/shared/types/domain';
 import {
   AssetPriceTicker,
@@ -880,15 +880,21 @@ function HomeGoalsSection({
   const metCount = rows.filter((row) =>
     isGoalMet(row.currentPercent, row.targetPercent, 'percent')
   ).length;
+  const pendingCount = rows.length - metCount;
+  const maxValue = Math.max(
+    1,
+    ...rows.flatMap((row) => [row.currentPercent, row.targetPercent])
+  );
 
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-purple-400/15 bg-[#1A1B26] p-4">
-      <div className="absolute -right-12 top-8 h-32 w-32 rounded-full bg-purple-500/10 blur-3xl" />
+      <div className="absolute -left-16 top-0 h-40 w-40 rounded-full bg-emerald-500/5 blur-3xl" />
+      <div className="absolute -right-16 bottom-0 h-40 w-40 rounded-full bg-rose-500/5 blur-3xl" />
       <div className="relative mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-purple-300">
             <Target size={16} />
-            <p className="text-sm font-bold">هدف‌های سبد</p>
+            <p className="text-sm font-bold text-white">هدف‌های سبد</p>
           </div>
           <p className="mt-1 text-[11px] text-slate-500">
             {rows.length > 0
@@ -912,39 +918,92 @@ function HomeGoalsSection({
           <span className="mt-2">از بخش مدیریت، هدف برای دارایی یا گروه تعریف کن.</span>
         </div>
       ) : (
-        <div className="relative space-y-3">
-          {rows.map((row) => {
-            const progress: GoalProgress = {
-              current: row.currentPercent,
-              target: row.targetPercent,
-              percentComplete:
-                row.targetPercent > 0
-                  ? (row.currentPercent / row.targetPercent) * 100
-                  : 0,
-              remaining: Math.max(0, row.targetPercent - row.currentPercent),
-            };
-
-            return (
-              <div
-                key={row.id}
-                className="rounded-2xl border border-white/5 bg-[#0F1015]/45 p-3 space-y-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-200">
-                    {row.name}
-                  </p>
-                  <p className="text-[10px] text-slate-500">{row.kindLabel}</p>
-                </div>
-                <GoalProgressDisplay
-                  label=""
-                  kind="percent"
-                  progress={progress}
-                  showIcon={false}
-                />
+        <>
+          <div className="relative mb-4 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-3 py-2">
+              <div className="mb-1 flex items-center gap-1.5 text-emerald-300">
+                <CheckCircle2 size={13} />
+                <span className="text-[10px]">رسیده به هدف</span>
               </div>
-            );
-          })}
-        </div>
+              <p className="text-sm font-bold text-white">
+                {metCount.toLocaleString('fa-IR')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-rose-500/15 bg-rose-500/5 px-3 py-2">
+              <div className="mb-1 flex items-center gap-1.5 text-rose-300">
+                <CircleDashed size={13} />
+                <span className="text-[10px]">در انتظار</span>
+              </div>
+              <p className="text-sm font-bold text-white">
+                {pendingCount.toLocaleString('fa-IR')}
+              </p>
+            </div>
+          </div>
+
+          <div className="relative flex h-36 items-end gap-1.5 sm:gap-2" dir="ltr">
+            {rows.map((row) => {
+              const currentH = (row.currentPercent / maxValue) * 100;
+              const targetH = (row.targetPercent / maxValue) * 100;
+              const progress = {
+                current: row.currentPercent,
+                target: row.targetPercent,
+                percentComplete:
+                  row.targetPercent > 0
+                    ? (row.currentPercent / row.targetPercent) * 100
+                    : 0,
+                remaining: Math.max(0, row.targetPercent - row.currentPercent),
+              };
+              const status = computeGoalDelta(progress, 'percent', '%').status;
+              const currentBarClass =
+                status === 'under' ? 'bg-rose-500/85' : 'bg-emerald-500/85';
+
+              return (
+                <div
+                  key={row.id}
+                  className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+                >
+                  <div className="flex h-28 w-full items-end justify-center gap-0.5">
+                    <div
+                      className={`w-[42%] max-w-5 rounded-t-md transition-all ${currentBarClass}`}
+                      style={{
+                        height: `${Math.max(row.currentPercent > 0 ? 4 : 0, currentH)}%`,
+                      }}
+                      title={`${row.name} · فعلی: ${row.currentPercent.toFixed(1)}% (${row.kindLabel})`}
+                    />
+                    <div
+                      className="w-[42%] max-w-5 rounded-t-md bg-white/20 transition-all"
+                      style={{
+                        height: `${Math.max(row.targetPercent > 0 ? 4 : 0, targetH)}%`,
+                      }}
+                      title={`${row.name} · هدف: ${row.targetPercent.toFixed(1)}% (${row.kindLabel})`}
+                    />
+                  </div>
+                  <span
+                    className="w-full truncate text-center text-[9px] text-slate-500 sm:text-[10px]"
+                    title={row.name}
+                  >
+                    {row.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 flex items-center justify-center gap-4 text-[10px] text-slate-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-sm bg-emerald-500/85" />
+              رسیده
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-sm bg-rose-500/85" />
+              کمتر از هدف
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-sm bg-white/20" />
+              هدف
+            </span>
+          </div>
+        </>
       )}
     </div>
   );
