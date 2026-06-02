@@ -26,6 +26,23 @@ export function todayJalaali(): JalaaliDate {
   return { jy, jm, jd };
 }
 
+/** Jalali calendar date for a timezone (default Tehran). Use for scheduled notifications. */
+export function todayJalaaliInTimezone(timeZone = 'Asia/Tehran'): JalaaliDate {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  const parts = fmt.formatToParts(new Date());
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  const gy = Number(map.year);
+  const gm = Number(map.month);
+  const gd = Number(map.day);
+  const { jy, jm, jd } = j.toJalaali(gy, gm, gd);
+  return { jy, jm, jd };
+}
+
 /** Format as canonical `YYYY/MM/DD` in ASCII digits — matches the shape stored in `transactions.date_string`. */
 export function formatJalaali(d: JalaaliDate): string {
   return `${d.jy}/${String(d.jm).padStart(2, '0')}/${String(d.jd).padStart(2, '0')}`;

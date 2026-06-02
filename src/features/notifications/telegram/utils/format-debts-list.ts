@@ -1,9 +1,9 @@
-import type { Loan, LoanInstallment } from '@/shared/types/domain';
 import {
+  formatJalaali,
   formatJalaaliHuman,
   parseJalaali,
-  todayJalaali,
-  formatJalaali,
+  todayJalaaliInTimezone,
+  type JalaaliDate,
 } from '@/shared/utils/jalali';
 import { compareJalaaliStrings, daysBetweenJalaali } from '@/features/notifications/utils/jalali-days';
 import {
@@ -12,12 +12,16 @@ import {
   toPersianDigits,
 } from '@/features/notifications/telegram/utils/format-helpers';
 
+export const TEHRAN_TIMEZONE = 'Asia/Tehran';
+
 export type DebtListItem = {
   loanTitle: string;
   dueDateString: string;
   amountToman: number;
   daysUntilDue: number;
 };
+
+export type DebtsListScope = 'today' | 'all';
 
 function dueLabel(daysUntilDue: number): string {
   if (daysUntilDue < 0) return `${toPersianDigits(Math.abs(daysUntilDue))} روز گذشته`;
@@ -26,24 +30,41 @@ function dueLabel(daysUntilDue: number): string {
   return `${toPersianDigits(daysUntilDue)} روز دیگر`;
 }
 
-export function formatDebtsListMessage(items: DebtListItem[]): string {
-  const today = todayJalaali();
+export function installmentDaysUntilDue(
+  dueDateString: string,
+  today: JalaaliDate = todayJalaaliInTimezone(TEHRAN_TIMEZONE)
+): number | null {
+  const todayStr = formatJalaali(today);
+  return daysBetweenJalaali(todayStr, dueDateString);
+}
+
+export function formatDebtsListMessage(
+  items: DebtListItem[],
+  scope: DebtsListScope = 'all'
+): string {
+  const today = todayJalaaliInTimezone(TEHRAN_TIMEZONE);
   const todayLine = toPersianDigits(formatJalaaliHuman(today));
+  const heading = scope === 'today' ? '⏰ قسط‌های امروز' : '📋 بدهی‌ها و اقساط';
 
   if (items.length === 0) {
-    return `📋 بدهی‌ها و اقساط\n${TELEGRAM_SEPARATOR}\n📅 ${todayLine}\n\n✅ قسط پرداخت‌نشده‌ای ندارید.\n${TELEGRAM_SEPARATOR}`;
+    const emptyLine =
+      scope === 'today'
+        ? '✅ امروز قسطی سررسید ندارید.'
+        : '✅ قسط پرداخت‌نشده‌ای ندارید.';
+    return `${heading}\n${TELEGRAM_SEPARATOR}\n📅 ${todayLine}\n\n${emptyLine}\n${TELEGRAM_SEPARATOR}`;
   }
 
   const sorted = [...items].sort((a, b) =>
     compareJalaaliStrings(a.dueDateString, b.dueDateString)
   );
 
-  const lines: string[] = [
-    '📋 بدهی‌ها و اقساط',
-    TELEGRAM_SEPARATOR,
-    `📅 ${todayLine}`,
-    '',
-  ];
+  const lines: string[] = [heading, TELEGRAM_SEPARATOR, `📅 ${todayLine}`, ''];
+
+  if (scope === 'today') {
+    const total = sorted.reduce((sum, item) => sum + item.amountToman, 0);
+    lines.push(`🟠 ${toPersianDigits(sorted.length)} قسط · ${formatTelegramMoney(total, 'TOMAN')}`);
+    lines.push('');
+  }
 
   for (const item of sorted) {
     const due = parseJalaali(item.dueDateString);
@@ -51,7 +72,7 @@ export function formatDebtsListMessage(items: DebtListItem[]): string {
       ? toPersianDigits(formatJalaaliHuman(due))
       : toPersianDigits(item.dueDateString);
     const icon = item.daysUntilDue < 0 ? '🔴' : item.daysUntilDue === 0 ? '🟠' : '📌';
-    lines.push(icon + ` ${item.loanTitle}`);
+    lines.push(`${icon} ${item.loanTitle}`);
     lines.push(`   📅 ${dueHuman} · ${dueLabel(item.daysUntilDue)}`);
     lines.push(`   💰 ${formatTelegramMoney(item.amountToman, 'TOMAN')}`);
     lines.push('');
@@ -59,9 +80,4 @@ export function formatDebtsListMessage(items: DebtListItem[]): string {
 
   lines.push(TELEGRAM_SEPARATOR);
   return lines.join('\n').trim();
-}
-
-export function installmentDaysUntilDue(dueDateString: string): number | null {
-  const todayStr = formatJalaali(todayJalaali());
-  return daysBetweenJalaali(todayStr, dueDateString);
 }

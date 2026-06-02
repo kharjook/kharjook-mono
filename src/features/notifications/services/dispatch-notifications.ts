@@ -12,17 +12,20 @@ import type {
 } from '@/shared/types/domain';
 import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
 import { buildUserNotificationSnapshot } from '@/features/notifications/utils/build-user-snapshot';
-import { formatDailyReportMessage } from '@/features/notifications/telegram/utils/format-messages';
+import { formatTodayCashflowMessage } from '@/features/notifications/telegram/utils/format-today-cashflow';
+import { formatJalaali, todayJalaaliInTimezone } from '@/shared/utils/jalali';
 import {
   formatDebtsListMessage,
   installmentDaysUntilDue,
+  TEHRAN_TIMEZONE,
   type DebtListItem,
+  type DebtsListScope,
 } from '@/features/notifications/telegram/utils/format-debts-list';
 import {
   sendTelegramMessage,
   TelegramSendError,
+  type TelegramReplyMarkup,
 } from '@/features/notifications/telegram/utils/telegram-client';
-import { formatJalaali, todayJalaali } from '@/shared/utils/jalali';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 
 /** Defaults for new rows; only `enabled` is user-facing in the app. */
@@ -70,6 +73,7 @@ async function loadUserData(userId: string) {
 }
 
 async function loadUnpaidDebtItems(userId: string): Promise<DebtListItem[]> {
+  const today = todayJalaaliInTimezone(TEHRAN_TIMEZONE);
   const admin = createSupabaseAdminClient();
   const { data: installments } = await admin
     .from('loan_installments')
@@ -93,7 +97,7 @@ async function loadUnpaidDebtItems(userId: string): Promise<DebtListItem[]> {
   for (const row of installments as LoanInstallment[]) {
     const loan = loanMap.get(row.loan_id);
     if (!loan) continue;
-    const daysUntil = installmentDaysUntilDue(row.due_date_string);
+    const daysUntil = installmentDaysUntilDue(row.due_date_string, today);
     if (daysUntil == null) continue;
     const rate = tomanPerUnit(loan.currency, rates);
     items.push({
@@ -142,10 +146,11 @@ async function markConnectionInactive(userId: string): Promise<void> {
 
 async function sendTelegramToConnection(
   connection: TelegramConnection,
-  text: string
+  text: string,
+  replyMarkup?: TelegramReplyMarkup
 ): Promise<void> {
   try {
-    await sendTelegramMessage(connection.telegram_chat_id, text);
+    await sendTelegramMessage(connection.telegram_chat_id, text, replyMarkup);
   } catch (err) {
     if (err instanceof TelegramSendError && err.blocked) {
       await markConnectionInactive(connection.user_id);
@@ -154,29 +159,38 @@ async function sendTelegramToConnection(
   }
 }
 
-export async function sendDailyReportForUser(
+export async function sendTodayCashflowForUser(
   userId: string,
-  connection: TelegramConnection
+  connection: TelegramConnection,
+  options?: { replyMarkup?: TelegramReplyMarkup }
 ): Promise<void> {
   const data = await loadUserData(userId);
   const snapshot = buildUserNotificationSnapshot(data);
-  const text = formatDailyReportMessage(snapshot);
-  await sendTelegramToConnection(connection, text);
+  const text = formatTodayCashflowMessage(snapshot.today, snapshot.todayUsd);
+  await sendTelegramToConnection(connection, text, options?.replyMarkup);
 }
 
+/** Daily cron at 09:00 Tehran — today's installments only, skip if none. */
 export async function sendDebtsListForUser(
   userId: string,
   connection: TelegramConnection,
-  options?: { skipDedup?: boolean }
+  options?: { skipDedup?: boolean; todayOnly?: boolean }
 ): Promise<boolean> {
-  const today = todayJalaali();
+  const today = todayJalaaliInTimezone(TEHRAN_TIMEZONE);
   const dedupKey = formatJalaali(today);
+  const scope: DebtsListScope = options?.todayOnly ? 'today' : 'all';
+
   if (!options?.skipDedup && (await wasDelivered(userId, 'loan_reminder', dedupKey))) {
     return false;
   }
 
-  const items = await loadUnpaidDebtItems(userId);
-  const text = formatDebtsListMessage(items);
+  let items = await loadUnpaidDebtItems(userId);
+  if (options?.todayOnly) {
+    items = items.filter((item) => item.daysUntilDue === 0);
+    if (items.length === 0) return false;
+  }
+
+  const text = formatDebtsListMessage(items, scope);
   await sendTelegramToConnection(connection, text);
 
   if (!options?.skipDedup) {
@@ -185,7 +199,7 @@ export async function sendDebtsListForUser(
   return true;
 }
 
-/** Daily cron at 09:00 Tehran — unpaid debts digest for opted-in users. */
+/** Daily cron at 09:00 Tehran — today's installments only, skip if none. */
 export async function processScheduledNotifications(): Promise<{
   debtsDigestsSent: number;
   errors: string[];
@@ -204,7 +218,7 @@ export async function processScheduledNotifications(): Promise<{
     if (!enabled) continue;
 
     try {
-      const sent = await sendDebtsListForUser(conn.user_id, conn);
+      const sent = await sendDebtsListForUser(conn.user_id, conn, { todayOnly: true });
       if (sent) debtsDigestsSent += 1;
     } catch (err) {
       errors.push(

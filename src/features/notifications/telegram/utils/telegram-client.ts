@@ -1,5 +1,12 @@
 const TELEGRAM_API = 'https://api.telegram.org';
 
+export type TelegramReplyMarkup = {
+  keyboard: Array<Array<{ text: string }>>;
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+  input_field_placeholder?: string;
+};
+
 export class TelegramSendError extends Error {
   constructor(
     message: string,
@@ -13,7 +20,8 @@ export class TelegramSendError extends Error {
 
 export async function sendTelegramMessage(
   chatId: number,
-  text: string
+  text: string,
+  replyMarkup?: TelegramReplyMarkup
 ): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
@@ -25,6 +33,7 @@ export async function sendTelegramMessage(
       chat_id: chatId,
       text,
       disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
   });
 

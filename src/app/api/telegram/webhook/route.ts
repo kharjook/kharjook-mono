@@ -3,10 +3,12 @@ import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
 import { consumeTelegramLinkToken } from '@/features/notifications/telegram/utils/link-token';
 import { sendTelegramMessage } from '@/features/notifications/telegram/utils/telegram-client';
 import {
-  BOT_COMMANDS_HELP,
-  handleBotCommand,
+  handleBotMessage,
+  sendBotMenu,
+  sendUnlinkedPrompt,
   sendWelcomeAfterLink,
 } from '@/features/notifications/telegram/bot-commands';
+import { BOT_WELCOME_LINKED } from '@/features/notifications/telegram/telegram-keyboard';
 
 export const runtime = 'nodejs';
 
@@ -47,10 +49,19 @@ export async function POST(request: Request) {
   if (text.startsWith('/start')) {
     const token = text.split(/\s+/)[1]?.trim();
     if (!token) {
-      await sendTelegramMessage(
-        chatId,
-        `👋 سلام!\nبرای اتصال به خرجوک، از تنظیمات اپ «اتصال تلگرام» را بزنید.\n\n${BOT_COMMANDS_HELP}`
-      );
+      const admin = createSupabaseAdminClient();
+      const { data } = await admin
+        .from('telegram_connections')
+        .select('id')
+        .eq('telegram_chat_id', chatId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (data) {
+        await sendBotMenu(chatId, BOT_WELCOME_LINKED);
+      } else {
+        await sendUnlinkedPrompt(chatId);
+      }
       return NextResponse.json({ ok: true });
     }
 
@@ -88,13 +99,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const handled = await handleBotCommand(chatId, text);
-  if (!handled && text.startsWith('/')) {
-    await sendTelegramMessage(
-      chatId,
-      `❓ دستور ناشناخته.\n\n${BOT_COMMANDS_HELP}`
-    );
-  }
-
+  await handleBotMessage(chatId, text);
   return NextResponse.json({ ok: true });
 }
