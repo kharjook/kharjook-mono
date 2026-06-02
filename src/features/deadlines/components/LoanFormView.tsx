@@ -22,13 +22,11 @@ import { buildInstallmentSchedule } from '@/features/deadlines/utils/schedule';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 
-const REMINDER_OFFSET_OPTIONS: { days: number; label: string }[] = [
-  { days: 0, label: 'روز سررسید' },
-  { days: 1, label: '۱ روز قبل' },
-  { days: 2, label: '۲ روز قبل' },
-  { days: 3, label: '۳ روز قبل' },
-  { days: 7, label: '۷ روز قبل' },
-  { days: 14, label: '۱۴ روز قبل' },
+const INTERVAL_OPTIONS: { id: LoanIntervalPeriod; label: string }[] = [
+  { id: 'day', label: 'روز' },
+  { id: 'week', label: 'هفته' },
+  { id: 'month', label: 'ماه' },
+  { id: 'year', label: 'سال' },
 ];
 
 type LoanFormState = {
@@ -46,15 +44,7 @@ type LoanFormState = {
   intervalPeriod: LoanIntervalPeriod;
   autoIncomeOnCreate: boolean;
   autoIncomeWalletId: string | null;
-  reminderDaysBefore: number[];
 };
-
-const INTERVAL_OPTIONS: { id: LoanIntervalPeriod; label: string }[] = [
-  { id: 'day', label: 'روز' },
-  { id: 'week', label: 'هفته' },
-  { id: 'month', label: 'ماه' },
-  { id: 'year', label: 'سال' },
-];
 
 function initialState(): LoanFormState {
   const today = formatJalaali(todayJalaali());
@@ -73,7 +63,6 @@ function initialState(): LoanFormState {
     intervalPeriod: 'month',
     autoIncomeOnCreate: false,
     autoIncomeWalletId: null,
-    reminderDaysBefore: [2],
   };
 }
 
@@ -132,7 +121,6 @@ export function LoanFormView({ loanId }: { loanId?: string }) {
           intervalPeriod: loan.interval_period,
           autoIncomeOnCreate: loan.auto_income_on_create,
           autoIncomeWalletId: loan.auto_income_wallet_id,
-          reminderDaysBefore: loan.reminder_days_before ?? [],
         });
       } catch (error) {
         console.error(error);
@@ -197,7 +185,6 @@ export function LoanFormView({ loanId }: { loanId?: string }) {
           .update({
             title: form.title.trim(),
             description: form.description.trim() || null,
-            reminder_days_before: form.reminderDaysBefore,
           })
           .eq('id', loanId);
         if (error) throw error;
@@ -256,7 +243,6 @@ export function LoanFormView({ loanId }: { loanId?: string }) {
         auto_income_wallet_id:
           form.type === 'loan' && form.autoIncomeOnCreate ? form.autoIncomeWalletId : null,
         description: form.description.trim() || null,
-        reminder_days_before: form.reminderDaysBefore,
         deleted_at: null,
       };
       const { data: loanData, error: loanErr } = await supabase
@@ -498,39 +484,6 @@ export function LoanFormView({ loanId }: { loanId?: string }) {
             )}
           </>
         )}
-
-        <div>
-          <label className="block text-xs text-slate-400 mb-2">یادآور تلگرام (قبل از سررسید)</label>
-          <div className="flex flex-wrap gap-2">
-            {REMINDER_OFFSET_OPTIONS.map((opt) => {
-              const selected = form.reminderDaysBefore.includes(opt.days);
-              return (
-                <button
-                  key={opt.days}
-                  type="button"
-                  onClick={() =>
-                    setForm((prev) => ({
-                      ...prev,
-                      reminderDaysBefore: selected
-                        ? prev.reminderDaysBefore.filter((d) => d !== opt.days)
-                        : [...prev.reminderDaysBefore, opt.days].sort((a, b) => a - b),
-                    }))
-                  }
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                    selected
-                      ? 'bg-sky-500/20 border-sky-500/40 text-sky-200'
-                      : 'bg-[#1A1B26] border-white/10 text-slate-400 hover:border-white/20'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2">
-            چند گزینه را می‌توانید انتخاب کنید. بدون انتخاب = بدون یادآور.
-          </p>
-        </div>
 
         <div>
           <label className="block text-xs text-slate-400 mb-1">مبلغ هر قسط</label>

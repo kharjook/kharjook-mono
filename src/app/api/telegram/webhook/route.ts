@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
 import { consumeTelegramLinkToken } from '@/features/notifications/telegram/utils/link-token';
-import {
-  DEFAULT_NOTIFICATION_SETTINGS,
-} from '@/features/notifications/services/dispatch-notifications';
 import { sendTelegramMessage } from '@/features/notifications/telegram/utils/telegram-client';
+import {
+  BOT_COMMANDS_HELP,
+  handleBotCommand,
+  sendWelcomeAfterLink,
+} from '@/features/notifications/telegram/bot-commands';
 
 export const runtime = 'nodejs';
 
@@ -42,28 +44,12 @@ export async function POST(request: Request) {
   const chatId = message.chat.id;
   const text = message.text.trim();
 
-  if (text === '/status') {
-    const admin = createSupabaseAdminClient();
-    const { data } = await admin
-      .from('telegram_connections')
-      .select('linked_at, is_active')
-      .eq('telegram_chat_id', chatId)
-      .maybeSingle();
-
-    const row = data as { linked_at: string; is_active: boolean } | null;
-    const reply = row?.is_active
-      ? `✅ متصل به خرجوک\n🕐 از ${new Date(row.linked_at).toLocaleString('fa-IR')}`
-      : '❌ هنوز به خرجوک متصل نشده‌اید.\nاز تنظیمات اپ، «اتصال تلگرام» را بزنید.';
-    await sendTelegramMessage(chatId, reply);
-    return NextResponse.json({ ok: true });
-  }
-
   if (text.startsWith('/start')) {
     const token = text.split(/\s+/)[1]?.trim();
     if (!token) {
       await sendTelegramMessage(
         chatId,
-        '👋 سلام!\nبرای اتصال به خرجوک، از تنظیمات اپ دکمه «اتصال تلگرام» را بزنید.'
+        `👋 سلام!\nبرای اتصال به خرجوک، از تنظیمات اپ «اتصال تلگرام» را بزنید.\n\n${BOT_COMMANDS_HELP}`
       );
       return NextResponse.json({ ok: true });
     }
@@ -94,15 +80,20 @@ export async function POST(request: Request) {
 
     await admin.from('notification_settings').upsert({
       user_id: consumed.userId,
-      ...DEFAULT_NOTIFICATION_SETTINGS,
+      enabled: true,
       updated_at: new Date().toISOString(),
     });
 
+    await sendWelcomeAfterLink(chatId);
+    return NextResponse.json({ ok: true });
+  }
+
+  const handled = await handleBotCommand(chatId, text);
+  if (!handled && text.startsWith('/')) {
     await sendTelegramMessage(
       chatId,
-      '✅ اتصال برقرار شد!\nاز این پس گزارش‌ها و یادآور اقساط را اینجا دریافت می‌کنید.'
+      `❓ دستور ناشناخته.\n\n${BOT_COMMANDS_HELP}`
     );
-    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ ok: true });

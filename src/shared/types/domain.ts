@@ -18,7 +18,6 @@ export type TransactionType =
 export type CategoryKind = 'asset' | 'income' | 'expense';
 export type LoanType = 'expense' | 'loan';
 export type LoanIntervalPeriod = 'day' | 'week' | 'month' | 'year';
-export type NotificationReportInterval = 'daily' | 'weekly';
 export type NotificationDeliveryKind = 'daily_report' | 'loan_reminder';
 export type GoalScope = 'asset' | 'asset_group';
 export type GoalTargetKind = 'quantity' | 'allocation_percent';
@@ -218,8 +217,8 @@ export interface Loan {
   auto_income_on_create: boolean;
   auto_income_wallet_id: string | null;
   description: string | null;
-  /** Days before due date to send Telegram reminders, e.g. [0, 2, 7]. Empty = none. */
-  reminder_days_before: number[];
+  /** @deprecated Per-loan offsets removed; daily digest lists all unpaid installments. */
+  reminder_days_before?: number[];
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -236,18 +235,8 @@ export interface TelegramConnection {
 
 export interface NotificationSettings {
   user_id: string;
+  /** Daily 9 AM Telegram digest of unpaid installments. */
   enabled: boolean;
-  report_enabled: boolean;
-  report_interval: NotificationReportInterval;
-  /** 0 = Saturday … 6 = Friday (Jalali week). Used when report_interval is weekly. */
-  report_day_of_week: number;
-  /** HH:MM:SS from Postgres `time` column */
-  report_time: string;
-  timezone: string;
-  show_portfolio_irt: boolean;
-  show_portfolio_usd: boolean;
-  show_cashflow_irt: boolean;
-  show_cashflow_usd: boolean;
   updated_at: string;
 }
 

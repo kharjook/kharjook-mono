@@ -31,16 +31,22 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Telegram notifications
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) and set env vars (see [`.env.example`](.env.example)):
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_WEBHOOK_SECRET` (optional, recommended)
-   - `CRON_SECRET` (Vercel Cron auth)
-   - `SUPABASE_SERVICE_ROLE_KEY` (cron + webhook only)
+1. Create a bot via [@BotFather](https://t.me/BotFather) and set env vars (see [`.env.example`](.env.example)).
 2. Apply migration [`supabase/migrations/20250603120000_telegram_notifications.sql`](supabase/migrations/20250603120000_telegram_notifications.sql).
 3. Deploy to Vercel and set webhook URL to `https://YOUR_DOMAIN/api/telegram/webhook`.
-4. In app **Settings**, connect Telegram and configure report schedule.
+4. In app **Settings**, connect Telegram and configure reminder/content toggles.
 
-Cron runs hourly via [`vercel.json`](vercel.json) and sends reports/reminders when each user's local time matches their settings.
+**How it works**
+
+- **Debts digest** — Vercel Cron once daily at **09:00 Tehran** (`30 5 * * *` UTC). Sends all unpaid installments. Opt-in via Settings (single on/off toggle).
+- **Financial reports** — on demand in Telegram: `/report`, `/debts`, `/help`, `/status`.
+
+Manual cron test:
+
+```bash
+curl -H "Authorization: Bearer YOUR_CRON_SECRET" \
+  https://YOUR_DOMAIN/api/cron/notifications
+```
 
 ## Deploy on Vercel
 

@@ -3,7 +3,6 @@ import type {
   Category,
   CurrencyMode,
   CurrencyRate,
-  NotificationSettings,
   Transaction,
   Wallet,
 } from '@/shared/types/domain';

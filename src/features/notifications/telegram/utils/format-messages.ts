@@ -1,14 +1,12 @@
-import type { NotificationSettings } from '@/shared/types/domain';
-import {
-  formatJalaaliHuman,
-  jalaaliWeekday,
-  parseJalaali,
-  todayJalaali,
-} from '@/shared/utils/jalali';
 import type {
   CashflowSummary,
   UserNotificationSnapshot,
 } from '@/features/notifications/utils/build-user-snapshot';
+import {
+  formatJalaaliHuman,
+  jalaaliWeekday,
+  todayJalaali,
+} from '@/shared/utils/jalali';
 import {
   formatTelegramMoney,
   JALALI_WEEKDAY_NAMES,
@@ -18,25 +16,22 @@ import {
 
 function formatCashflowBlock(
   label: string,
-  toman?: CashflowSummary,
-  usd?: CashflowSummary
+  toman: CashflowSummary,
+  usd: CashflowSummary
 ): string[] {
-  const lines: string[] = [`📆 ${label}`];
-  if (toman) {
-    lines.push(`💚 درآمد: ${formatTelegramMoney(toman.income, 'TOMAN')}`);
-    lines.push(`🔴 هزینه: ${formatTelegramMoney(toman.expense, 'TOMAN')}`);
-    lines.push(`📈 خالص: ${formatTelegramMoney(toman.net, 'TOMAN')}`);
-  }
-  if (usd) {
-    lines.push(`💚 درآمد: ${formatTelegramMoney(usd.income, 'USD')}`);
-    lines.push(`🔴 هزینه: ${formatTelegramMoney(usd.expense, 'USD')}`);
-    lines.push(`📈 خالص: ${formatTelegramMoney(usd.net, 'USD')}`);
-  }
-  return lines;
+  return [
+    `📆 ${label}`,
+    `💚 درآمد: ${formatTelegramMoney(toman.income, 'TOMAN')}`,
+    `🔴 هزینه: ${formatTelegramMoney(toman.expense, 'TOMAN')}`,
+    `📈 خالص: ${formatTelegramMoney(toman.net, 'TOMAN')}`,
+    `💚 درآمد: ${formatTelegramMoney(usd.income, 'USD')}`,
+    `🔴 هزینه: ${formatTelegramMoney(usd.expense, 'USD')}`,
+    `📈 خالص: ${formatTelegramMoney(usd.net, 'USD')}`,
+  ];
 }
 
+/** On-demand bot report — always includes all sections. */
 export function formatDailyReportMessage(
-  settings: NotificationSettings,
   snapshot: UserNotificationSnapshot & {
     todayUsd: CashflowSummary;
     monthUsd: CashflowSummary;
@@ -51,40 +46,16 @@ export function formatDailyReportMessage(
     TELEGRAM_SEPARATOR,
     `📅 ${dateLine}`,
     '',
+    ...formatCashflowBlock('امروز', snapshot.today, snapshot.todayUsd),
+    '',
+    ...formatCashflowBlock('ماه جاری (تا امروز)', snapshot.month, snapshot.monthUsd),
+    '',
+    '💼 ارزش کل پرتفolio',
+    `🇮🇷 ${formatTelegramMoney(snapshot.portfolio.totalToman, 'TOMAN')}`,
+    `💵 نقد: ${formatTelegramMoney(snapshot.portfolio.cashToman, 'TOMAN')} · 📦 دارایی: ${formatTelegramMoney(snapshot.portfolio.assetsToman, 'TOMAN')}`,
+    `🇺🇸 ${formatTelegramMoney(snapshot.portfolio.totalUsd, 'USD')}`,
+    '',
   ];
-
-  if (settings.show_cashflow_irt || settings.show_cashflow_usd) {
-    lines.push(
-      ...formatCashflowBlock(
-        'امروز',
-        settings.show_cashflow_irt ? snapshot.today : undefined,
-        settings.show_cashflow_usd ? snapshot.todayUsd : undefined
-      ),
-      ''
-    );
-    lines.push(
-      ...formatCashflowBlock(
-        'ماه جاری (تا امروز)',
-        settings.show_cashflow_irt ? snapshot.month : undefined,
-        settings.show_cashflow_usd ? snapshot.monthUsd : undefined
-      ),
-      ''
-    );
-  }
-
-  if (settings.show_portfolio_irt || settings.show_portfolio_usd) {
-    lines.push('💼 ارزش کل پرتفolio');
-    if (settings.show_portfolio_irt) {
-      lines.push(`🇮🇷 ${formatTelegramMoney(snapshot.portfolio.totalToman, 'TOMAN')}`);
-      lines.push(
-        `💵 نقد: ${formatTelegramMoney(snapshot.portfolio.cashToman, 'TOMAN')} · 📦 دارایی: ${formatTelegramMoney(snapshot.portfolio.assetsToman, 'TOMAN')}`
-      );
-    }
-    if (settings.show_portfolio_usd) {
-      lines.push(`🇺🇸 ${formatTelegramMoney(snapshot.portfolio.totalUsd, 'USD')}`);
-    }
-    lines.push('');
-  }
 
   const unpriced =
     snapshot.today.unpricedCount +
@@ -100,40 +71,4 @@ export function formatDailyReportMessage(
 
   lines.push(TELEGRAM_SEPARATOR);
   return lines.join('\n').trim();
-}
-
-export function formatLoanReminderMessage(input: {
-  loanTitle: string;
-  dueDateString: string;
-  daysUntilDue: number;
-  amountToman: number;
-  amountUsd: number;
-  showIrt: boolean;
-  showUsd: boolean;
-}): string {
-  const { loanTitle, dueDateString, daysUntilDue, amountToman, amountUsd } = input;
-  const due = parseJalaali(dueDateString);
-  const dueHuman = due ? toPersianDigits(formatJalaaliHuman(due)) : toPersianDigits(dueDateString);
-  const when =
-    daysUntilDue === 0
-      ? 'امروز'
-      : daysUntilDue === 1
-        ? 'فردا'
-        : `${toPersianDigits(daysUntilDue)} روز دیگر`;
-
-  const lines = [
-    '⏰ یادآور قسط',
-    TELEGRAM_SEPARATOR,
-    `📌 ${loanTitle}`,
-    `📅 سررسید: ${dueHuman} (${when})`,
-  ];
-
-  if (input.showIrt) {
-    lines.push(`💰 مبلغ: ${formatTelegramMoney(amountToman, 'TOMAN')}`);
-  }
-  if (input.showUsd) {
-    lines.push(`💰 مبلغ: ${formatTelegramMoney(amountUsd, 'USD')}`);
-  }
-  lines.push(TELEGRAM_SEPARATOR);
-  return lines.join('\n');
 }
