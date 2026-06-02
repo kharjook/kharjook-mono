@@ -1,5 +1,5 @@
 import type { PriceSourceSetting, PriceSourceUsdFactor } from '@/shared/types/domain';
-import type { ProviderQuote } from '@/features/prices/utils/provider-quote-utils';
+import type { ProviderQuote } from '@/features/prices/utils/provider-refresh';
 
 export const DEFAULT_CONVERSION_RATE = 1;
 export const DEFAULT_USD_FACTOR: PriceSourceUsdFactor = 'none';
