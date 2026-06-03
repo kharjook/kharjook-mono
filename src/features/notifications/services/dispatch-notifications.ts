@@ -46,6 +46,7 @@ import { isInPeriod, periodContaining } from '@/shared/utils/period';
 import {
   loadUserAssetsWithRates,
   refreshUserPricesFromProviders,
+  processAutoPriceRefresh,
 } from '@/features/notifications/services/server-price-refresh';
 import { formatPortfolioMessage } from '@/features/notifications/telegram/utils/format-portfolio';
 import {
@@ -522,16 +523,21 @@ export async function sendScheduledReportForUser(
   return true;
 }
 
-/** Daily cron at 09:00 Tehran — installments, reports, caps, recurring txs. */
+/** Daily cron at 09:00 Tehran — installments, reports, caps, recurring txs, auto prices. */
 export async function processScheduledNotifications(): Promise<{
   debtsDigestsSent: number;
   reportsDigestsSent: number;
   categoryCapAlertsSent: number;
   recurringTransactionsCreated: number;
+  priceRefreshUsersProcessed: number;
+  priceRefreshAssetsUpdated: number;
   errors: string[];
 }> {
   const recurringResult = await processRecurringTransactions();
   const errors: string[] = [...recurringResult.errors];
+
+  const priceRefreshResult = await processAutoPriceRefresh();
+  errors.push(...priceRefreshResult.errors);
 
   const admin = createSupabaseAdminClient();
   const { data: connections } = await admin
@@ -546,6 +552,8 @@ export async function processScheduledNotifications(): Promise<{
       reportsDigestsSent: 0,
       categoryCapAlertsSent: 0,
       recurringTransactionsCreated: recurringResult.created,
+      priceRefreshUsersProcessed: priceRefreshResult.usersProcessed,
+      priceRefreshAssetsUpdated: priceRefreshResult.assetsUpdated,
       errors,
     };
   }
@@ -643,6 +651,8 @@ export async function processScheduledNotifications(): Promise<{
     reportsDigestsSent,
     categoryCapAlertsSent,
     recurringTransactionsCreated: recurringResult.created,
+    priceRefreshUsersProcessed: priceRefreshResult.usersProcessed,
+    priceRefreshAssetsUpdated: priceRefreshResult.assetsUpdated,
     errors,
   };
 }

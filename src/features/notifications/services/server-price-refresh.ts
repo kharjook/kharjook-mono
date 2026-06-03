@@ -248,6 +248,40 @@ export async function refreshUserPricesFromProviders(
   };
 }
 
+export async function processAutoPriceRefresh(): Promise<{
+  usersProcessed: number;
+  assetsUpdated: number;
+  errors: string[];
+}> {
+  const admin = createSupabaseAdminClient();
+  const { data: rows, error } = await admin
+    .from('assets')
+    .select('user_id')
+    .not('price_source_id', 'is', null);
+
+  if (error) {
+    return { usersProcessed: 0, assetsUpdated: 0, errors: [error.message] };
+  }
+
+  const userIds = Array.from(new Set((rows ?? []).map((row) => row.user_id as string)));
+  let assetsUpdated = 0;
+  const errors: string[] = [];
+
+  for (const userId of userIds) {
+    try {
+      const result = await refreshUserPricesFromProviders(userId);
+      assetsUpdated += result.updatedCount;
+      if (result.failedProviders.length > 0) {
+        errors.push(`${userId}:providers:${result.failedProviders.join(',')}`);
+      }
+    } catch (err) {
+      errors.push(`${userId}:${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { usersProcessed: userIds.length, assetsUpdated, errors };
+}
+
 export async function loadUserAssetsWithRates(userId: string): Promise<{
   assets: Asset[];
   usdRate: number;

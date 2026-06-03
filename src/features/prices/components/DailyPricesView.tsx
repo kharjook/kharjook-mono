@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowRight, ChevronDown, RefreshCw } from 'lucide-react';
+import { ArrowRight, AlertCircle, ChevronDown, RefreshCw } from 'lucide-react';
 import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { useToast } from '@/shared/components/Toast';
 import { supabase } from '@/shared/lib/supabase/client';
@@ -29,6 +29,7 @@ import {
   CURRENCY_META,
   RATE_ORDER,
 } from '@/features/wallets/constants/currency-meta';
+import { evaluateAutoPriceHealth } from '@/features/prices/utils/auto-price-health';
 
 type LocalPrices = Record<string, { toman: string; usd: string }>;
 type LocalRates = Partial<Record<RateCurrency, string>>;
@@ -71,6 +72,7 @@ export function DailyPricesView() {
     setDailyPrices,
     priceSourceSettings,
     priceSourceCatalog,
+    dailyPrices,
   } = useData();
   const { usdRate } = useUI();
 
@@ -132,6 +134,11 @@ export function DailyPricesView() {
     Number.isFinite(currentUsdNum) && currentUsdNum > 0 ? currentUsdNum : 0;
 
   const refreshableAssets = assets.filter((asset) => !!asset.price_source_id);
+  const todayStr = useMemo(() => formatJalaali(todayJalaali()), []);
+  const autoPriceHealth = useMemo(
+    () => evaluateAutoPriceHealth({ assets, dailyPrices, todayStr }),
+    [assets, dailyPrices, todayStr]
+  );
   const visibleAssets = useMemo(
     () =>
       assets.filter((asset) => {
@@ -449,6 +456,31 @@ export function DailyPricesView() {
       </div>
 
       <div className="p-6 space-y-6">
+        {refreshableAssets.length > 0 && (
+          <div
+            className={`flex items-start gap-2 rounded-xl px-3 py-2.5 border ${
+              autoPriceHealth.isHealthy
+                ? 'bg-emerald-500/10 border-emerald-500/20'
+                : 'bg-amber-500/10 border-amber-500/20'
+            }`}
+          >
+            {autoPriceHealth.isHealthy ? (
+              <RefreshCw size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+            ) : (
+              <AlertCircle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+            )}
+            <p
+              className={`text-[11px] leading-relaxed ${
+                autoPriceHealth.isHealthy ? 'text-emerald-200' : 'text-amber-200'
+              }`}
+            >
+              {autoPriceHealth.isHealthy
+                ? `قیمت خودکار ${autoPriceHealth.syncedTodayCount.toLocaleString('fa-IR')} دارایی امروز دریافت شده (بروزرسانی روزانه ~۰۹:۰۰).`
+                : `قیمت خودکار ${autoPriceHealth.missingTodayCount.toLocaleString('fa-IR')} از ${autoPriceHealth.autoAssetCount.toLocaleString('fa-IR')} دارایی امروز دریافت نشده — دکمه بروزرسانی را بزنید یا منبع قیمت را بررسی کنید.`}
+            </p>
+          </div>
+        )}
+
         <div className="bg-purple-900/20 border border-purple-500/30 p-5 rounded-3xl">
           <label className="block text-sm text-purple-300 mb-2 font-medium">
             نرخ دلار (تومان)
