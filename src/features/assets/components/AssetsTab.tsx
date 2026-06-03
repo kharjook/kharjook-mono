@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity, Plus, Settings2, TargetIcon, TrendingUp } from 'lucide-react';
 import { EntityIcon } from '@/shared/components/EntityIcon';
+import { EmptyState } from '@/shared/components/EmptyState';
 import type { Asset, Category } from '@/shared/types/domain';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
@@ -121,17 +122,12 @@ export function AssetsTab() {
       )}
 
       {!isLoadingData && assets.length === 0 && (
-        <div className="text-center py-10 space-y-3">
-          <p className="text-slate-500 text-sm">هنوز دارایی‌ای نساخته‌ای.</p>
-          <button
-            type="button"
-            onClick={() => router.push('/manage/assets')}
-            className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 text-sm font-medium"
-          >
-            <Plus size={16} />
-            افزودن دارایی
-          </button>
-        </div>
+        <EmptyState
+          icon={<TrendingUp size={24} />}
+          title="هنوز دارایی‌ای نساخته‌ای."
+          actionLabel="افزودن دارایی"
+          onAction={() => router.push('/manage/assets')}
+        />
       )}
 
       {assets.length > 0 && (

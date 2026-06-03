@@ -52,21 +52,53 @@ export async function PUT(request: Request) {
     price_alert_enabled?: boolean;
     expense_alert_enabled?: boolean;
   };
-  const enabled = body.enabled ?? DEFAULT_NOTIFICATION_SETTINGS.enabled;
-  const price_alert_enabled =
-    body.price_alert_enabled ?? DEFAULT_NOTIFICATION_SETTINGS.price_alert_enabled;
-  const expense_alert_enabled =
-    body.expense_alert_enabled ?? DEFAULT_NOTIFICATION_SETTINGS.expense_alert_enabled;
 
   const supabase = await createSupabaseServerClient();
+  const { data: existing, error: loadError } = await supabase
+    .from('notification_settings')
+    .select('enabled, price_alert_enabled, expense_alert_enabled')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (loadError) {
+    console.error(loadError);
+    return NextResponse.json({ error: 'Failed to load settings' }, { status: 500 });
+  }
+
+  const row = existing as {
+    enabled?: boolean;
+    price_alert_enabled?: boolean;
+    expense_alert_enabled?: boolean;
+  } | null;
+
+  const current = {
+    enabled: row?.enabled ?? DEFAULT_NOTIFICATION_SETTINGS.enabled,
+    price_alert_enabled:
+      row?.price_alert_enabled ?? DEFAULT_NOTIFICATION_SETTINGS.price_alert_enabled,
+    expense_alert_enabled:
+      row?.expense_alert_enabled ?? DEFAULT_NOTIFICATION_SETTINGS.expense_alert_enabled,
+  };
+
+  const next = {
+    enabled: body.enabled !== undefined ? body.enabled : current.enabled,
+    price_alert_enabled:
+      body.price_alert_enabled !== undefined
+        ? body.price_alert_enabled
+        : current.price_alert_enabled,
+    expense_alert_enabled:
+      body.expense_alert_enabled !== undefined
+        ? body.expense_alert_enabled
+        : current.expense_alert_enabled,
+  };
+
   const { data, error } = await supabase
     .from('notification_settings')
     .upsert(
       {
         user_id: user.id,
-        enabled,
-        price_alert_enabled,
-        expense_alert_enabled,
+        enabled: next.enabled,
+        price_alert_enabled: next.price_alert_enabled,
+        expense_alert_enabled: next.expense_alert_enabled,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' }

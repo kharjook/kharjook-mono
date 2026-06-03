@@ -122,6 +122,7 @@ export async function POST(request: Request) {
       user_id: consumed.userId,
       enabled: true,
       price_alert_enabled: false,
+      expense_alert_enabled: false,
       updated_at: new Date().toISOString(),
     });
 

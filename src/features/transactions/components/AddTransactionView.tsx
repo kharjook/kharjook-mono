@@ -50,6 +50,10 @@ import type {
 } from '@/shared/types/domain';
 import { useAuth, useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { fireExpenseAlert } from '@/features/notifications/client/fire-expense-alert';
+import {
+  applyExpensePayloadFields,
+  computeExpenseAmountSnapshots,
+} from '@/features/transactions/utils/expense-transaction';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
@@ -749,34 +753,8 @@ function computeAmountSnapshots(
       return { toman: null, usd: null };
     }
 
-    case 'EXPENSE': {
-      const amount = Number(form.sourceAmount);
-      if (!Number.isFinite(amount) || amount <= 0) return { toman: null, usd: null };
-
-      if (form.sourceKind === 'asset') {
-        const price = Number(form.priceToman);
-        if (!Number.isFinite(price) || price <= 0) return { toman: null, usd: null };
-        return computeFromAmountPrice(amount, price);
-      }
-      if (form.sourceKind === 'wallet' && form.sourceId) {
-        const w = wallets.find((x) => x.id === form.sourceId);
-        if (!w) return { toman: null, usd: null };
-        if (w.currency === 'IRT') {
-          return computeFromAmountPrice(amount, 1);
-        }
-        const explicit = Number(form.priceToman);
-        const price =
-          Number.isFinite(explicit) && explicit > 0
-            ? explicit
-            : walletRateForTransfer(w, currencyRates, fallbackUsdRate, form.usdRate);
-        if (!(price > 0)) return { toman: null, usd: null };
-        return computeFromAmountPrice(amount, price);
-      }
-      if (form.sourceKind === 'person') {
-        return computeFromAmountPrice(amount, 1);
-      }
-      return { toman: null, usd: null };
-    }
+    case 'EXPENSE':
+      return computeExpenseAmountSnapshots(form, wallets, currencyRates, fallbackUsdRate);
 
     case 'TRANSFER':
       return { toman: null, usd: null };
@@ -916,16 +894,7 @@ function buildPayload(
       }
       break;
     case 'EXPENSE':
-      setSource();
-      base.category_id = form.categoryId;
-      // Asset-side EXPENSE: populate the legacy trio so asset stats
-      // realize P/L against running cost basis (symmetric with a SELL).
-      if (form.sourceKind === 'asset') {
-        base.asset_id = form.sourceId;
-        base.amount = Number(form.sourceAmount);
-        base.price_toman = Number(form.priceToman);
-        base.usd_rate = Number(form.usdRate);
-      }
+      applyExpensePayloadFields(base, form);
       break;
   }
 

@@ -388,11 +388,28 @@ export async function processScheduledNotifications(): Promise<{
     .select('*')
     .eq('is_active', true);
 
+  const activeConnections = (connections ?? []) as TelegramConnection[];
+  if (activeConnections.length === 0) {
+    return { debtsDigestsSent: 0, errors: [] };
+  }
+
+  const userIds = activeConnections.map((conn) => conn.user_id);
+  const { data: settingsRows } = await admin
+    .from('notification_settings')
+    .select('user_id, enabled')
+    .in('user_id', userIds);
+
+  const enabledByUser = new Map<string, boolean>();
+  for (const row of settingsRows ?? []) {
+    const settings = row as { user_id: string; enabled: boolean };
+    enabledByUser.set(settings.user_id, settings.enabled);
+  }
+
   let debtsDigestsSent = 0;
   const errors: string[] = [];
 
-  for (const conn of (connections ?? []) as TelegramConnection[]) {
-    const enabled = await loadNotificationEnabled(conn.user_id);
+  for (const conn of activeConnections) {
+    const enabled = enabledByUser.get(conn.user_id) ?? BOT_DEFAULT_NOTIFICATION_SETTINGS.enabled;
     if (!enabled) continue;
 
     try {

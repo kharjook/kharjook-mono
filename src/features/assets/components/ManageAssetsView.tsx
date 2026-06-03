@@ -31,6 +31,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
+import { deleteEntityIcon } from '@/shared/utils/entity-icon-storage';
 import type { Asset } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
@@ -344,8 +345,12 @@ export function ManageAssetsView() {
           setAssets(prev);
         },
         commit: async () => {
+          const asset = snapshot.find((a) => a.id === id);
           const { error } = await supabase.from('assets').delete().eq('id', id);
           if (error) throw error;
+          if (asset?.icon_url) {
+            await deleteEntityIcon(supabase, asset.icon_url);
+          }
         },
         onSuccess: () => {
           setPendingAssetIds((p) => {

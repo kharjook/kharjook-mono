@@ -2,8 +2,9 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, Plus, Settings2, Wallet as WalletIcon } from 'lucide-react';
+import { ChevronLeft, Settings2, Wallet as WalletIcon } from 'lucide-react';
 import { EntityIcon } from '@/shared/components/EntityIcon';
+import { EmptyState } from '@/shared/components/EmptyState';
 import { useData, useUI } from '@/features/portfolio/PortfolioProvider';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
@@ -73,17 +74,12 @@ export function WalletsTab() {
       )}
 
       {!isLoadingData && wallets.length === 0 && (
-        <div className="text-center py-10 space-y-3">
-          <p className="text-slate-500 text-sm">هنوز کیف پولی نساخته‌ای.</p>
-          <button
-            type="button"
-            onClick={() => router.push('/manage/wallets')}
-            className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 text-sm font-medium"
-          >
-            <Plus size={16} />
-            افزودن کیف پول
-          </button>
-        </div>
+        <EmptyState
+          icon={<WalletIcon size={24} />}
+          title="هنوز کیف پولی نساخته‌ای."
+          actionLabel="افزودن کیف پول"
+          onAction={() => router.push('/manage/wallets')}
+        />
       )}
 
       {wallets.length > 0 && (

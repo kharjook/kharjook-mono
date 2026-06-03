@@ -18,7 +18,7 @@ export type TransactionType =
 export type CategoryKind = 'asset' | 'income' | 'expense';
 export type LoanType = 'expense' | 'loan';
 export type LoanIntervalPeriod = 'day' | 'week' | 'month' | 'year';
-export type NotificationDeliveryKind = 'daily_report' | 'loan_reminder';
+export type NotificationDeliveryKind = 'daily_report' | 'loan_reminder' | 'expense_alert';
 export type GoalScope = 'asset' | 'asset_group';
 export type GoalTargetKind = 'quantity' | 'allocation_percent';
 

@@ -49,6 +49,7 @@ import type {
 import type { PriceSource } from '@/features/prices/constants/price-sources';
 
 const USD_RATE_SOURCE_SLUG = 'abantether.usdt';
+const TRANSACTIONS_PAGE_SIZE = 200;
 
 interface AuthValue {
   user: AuthUser | null;
@@ -74,6 +75,8 @@ interface DataValue {
   priceSources: PriceSourceRecord[];
   priceSourceCatalog: PriceSource[];
   isLoadingData: boolean;
+  /** False while background pages of transactions are still loading. */
+  transactionsFullyLoaded: boolean;
   setCategories: Dispatch<SetStateAction<Category[]>>;
   setAssets: Dispatch<SetStateAction<Asset[]>>;
   setTransactions: Dispatch<SetStateAction<Transaction[]>>;
@@ -131,6 +134,7 @@ export function PortfolioProvider({
   const [priceSourceSettings, setPriceSourceSettings] = useState<PriceSourceSetting[]>([]);
   const [priceSources, setPriceSources] = useState<PriceSourceRecord[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [transactionsFullyLoaded, setTransactionsFullyLoaded] = useState(true);
 
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>('TOMAN');
 
@@ -155,8 +159,9 @@ export function PortfolioProvider({
           .order('created_at', { ascending: true }),
         supabase
           .from('transactions')
-          .select('*')
-          .order('created_at', { ascending: false }),
+          .select('*', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .range(0, TRANSACTIONS_PAGE_SIZE - 1),
         supabase
           .from('wallets')
           .select('*')
@@ -201,6 +206,7 @@ export function PortfolioProvider({
       const nextCategories = (catRes.data as Category[]) || [];
       let nextAssets = (astRes.data as Asset[]) || [];
       const nextTransactions = (txRes.data as Transaction[]) || [];
+      const transactionTotalCount = txRes.count ?? nextTransactions.length;
       const nextWallets = (walRes.data as Wallet[]) || [];
       let nextCurrencyRates = (rateRes.data as CurrencyRate[]) || [];
       const nextPersons = (perRes.data as Person[]) || [];
@@ -293,6 +299,33 @@ export function PortfolioProvider({
       setGoals(nextGoals);
       setPriceSourceSettings(nextPriceSourceSettings);
       setPriceSources(nextPriceSources);
+
+      const needsMoreTransactions = transactionTotalCount > TRANSACTIONS_PAGE_SIZE;
+      setTransactionsFullyLoaded(!needsMoreTransactions);
+
+      if (needsMoreTransactions) {
+        void (async () => {
+          let offset = TRANSACTIONS_PAGE_SIZE;
+          let merged = [...nextTransactions];
+          while (offset < transactionTotalCount) {
+            const { data: page, error: pageError } = await supabase
+              .from('transactions')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .range(offset, offset + TRANSACTIONS_PAGE_SIZE - 1);
+            if (pageError || !page?.length) break;
+            merged = [...merged, ...(page as Transaction[])];
+            offset += TRANSACTIONS_PAGE_SIZE;
+            if (seq === fetchSeq.current) {
+              setTransactions(merged);
+            }
+            if (page.length < TRANSACTIONS_PAGE_SIZE) break;
+          }
+          if (seq === fetchSeq.current) {
+            setTransactionsFullyLoaded(true);
+          }
+        })();
+      }
     } catch (error) {
       if (seq !== fetchSeq.current) return;
       console.error('Error fetching data:', error);
@@ -342,6 +375,7 @@ export function PortfolioProvider({
       setGoals([]);
       setPriceSourceSettings([]);
       setPriceSources([]);
+      setTransactionsFullyLoaded(true);
     }
   }, [user, refresh]);
 
@@ -379,6 +413,7 @@ export function PortfolioProvider({
       priceSources,
       priceSourceCatalog,
       isLoadingData,
+      transactionsFullyLoaded,
       setCategories,
       setAssets,
       setTransactions,
@@ -405,6 +440,7 @@ export function PortfolioProvider({
       priceSources,
       priceSourceCatalog,
       isLoadingData,
+      transactionsFullyLoaded,
       refresh,
       refreshAll,
     ]

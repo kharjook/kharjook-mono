@@ -9,7 +9,7 @@ export interface BotNotificationSettings {
 export const DEFAULT_NOTIFICATION_SETTINGS: BotNotificationSettings = {
   enabled: true,
   price_alert_enabled: false,
-  expense_alert_enabled: true,
+  expense_alert_enabled: false,
 };
 
 export async function loadBotNotificationSettings(
@@ -32,7 +32,7 @@ export async function loadBotNotificationSettings(
   return {
     enabled: row.enabled,
     price_alert_enabled: row.price_alert_enabled ?? false,
-    expense_alert_enabled: row.expense_alert_enabled ?? true,
+    expense_alert_enabled: row.expense_alert_enabled ?? false,
   };
 }
 

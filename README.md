@@ -1,45 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kharjook (خرجوک)
+
+Persian RTL personal finance PWA — assets, wallets, cashflow, loans, goals, and Telegram notifications.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy [`.env.example`](.env.example) and set Supabase + Telegram + cron secrets.
 
-## Learn More
+## Database migrations
 
-To learn more about Next.js, take a look at the following resources:
+Migrations live in [`supabase/migrations/`](supabase/migrations/). Apply in filename order on your Supabase project (SQL editor or CLI):
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+supabase db push
+# or run each .sql file manually in the Supabase dashboard
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Migration | Purpose |
+|-----------|---------|
+| `20250602120000_add_transaction_operation_id.sql` | Transaction grouping |
+| `20250603120000_telegram_notifications.sql` | Telegram + notification tables |
+| `20250604120000_telegram_bot_enhancements.sql` | Bot menu state, price alerts |
+| `20250605120000_wallet_payment_details.sql` | Wallet card/IBAN fields |
+| `20250606120000_wallet_account_owner_name.sql` | Account holder name |
+| `20250607120000_expense_alert_enabled.sql` | Expense alert toggle column |
+| `20250608120000_performance_indexes.sql` | Query indexes |
+| `20250608130000_expense_alert_default_off.sql` | Expense alerts opt-in (default off) |
+| `20250608140000_expense_alert_delivery_kind.sql` | Dedup enum for expense alerts |
+| `20250608150000_cashflow_rpc.sql` | SQL aggregates for cashflow |
+
+**Baseline schema:** Core tables (`transactions`, `assets`, `wallets`, …) predate these incremental migrations. To capture full prod schema in git:
+
+```bash
+supabase link --project-ref YOUR_REF
+supabase db pull
+```
+
+Commit the generated snapshot so new contributors can audit RLS and indexes.
 
 ## Telegram notifications
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) and set env vars (see [`.env.example`](.env.example)).
-2. Apply migration [`supabase/migrations/20250603120000_telegram_notifications.sql`](supabase/migrations/20250603120000_telegram_notifications.sql).
-3. Deploy to Vercel and set webhook URL to `https://YOUR_DOMAIN/api/telegram/webhook`.
-4. In app **Settings**, connect Telegram and configure reminder/content toggles.
-
-**How it works**
-
-- **Debts digest** — Vercel Cron once daily at **09:00 Tehran** (`30 5 * * *` UTC). Sends all unpaid installments. Opt-in via Settings (single on/off toggle).
-- **Financial reports** — on demand in Telegram: `/report`, `/debts`, `/help`, `/status`.
+1. Create a bot via [@BotFather](https://t.me/BotFather).
+2. Apply all migrations above.
+3. Deploy and register webhook: `https://YOUR_DOMAIN/api/telegram/webhook`
+4. In app **Settings**, connect Telegram and configure toggles:
+   - **Debt reminder** — daily 09:00 Tehran, today's installments only
+   - **Price change alert** — after manual price refresh in bot
+   - **Expense alert** — opt-in; message on each new expense
 
 Manual cron test:
 
@@ -50,6 +65,4 @@ curl -H "Authorization: Bearer YOUR_CRON_SECRET" \
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Cron is defined in [`vercel.json`](vercel.json) (`30 5 * * *` UTC ≈ 09:00 Asia/Tehran).

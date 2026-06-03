@@ -27,6 +27,7 @@ import { formatCurrencyAmount } from '@/shared/utils/format-currency';
 import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
 import { haptic } from '@/shared/utils/haptics';
 import { supabase } from '@/shared/lib/supabase/client';
+import { deleteEntityIcon } from '@/shared/utils/entity-icon-storage';
 import type { Currency, Wallet } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import {
@@ -284,6 +285,9 @@ export function ManageWalletsView() {
             .update({ archived_at: new Date().toISOString() })
             .eq('id', w.id);
           if (error) throw error;
+          if (w.icon_url) {
+            await deleteEntityIcon(supabase, w.icon_url);
+          }
         },
         onSuccess: () => {
           setPendingWalletIds((p) => {

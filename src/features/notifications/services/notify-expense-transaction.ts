@@ -1,12 +1,13 @@
 import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
-import type { Category, TelegramConnection, Transaction } from '@/shared/types/domain';
+import type { TelegramConnection, Transaction } from '@/shared/types/domain';
 import { formatExpenseAlertMessage } from '@/features/notifications/telegram/utils/format-expense-alert';
+import { TEHRAN_TIMEZONE } from '@/features/notifications/telegram/utils/format-debts-list';
 import {
   sendTelegramMessage,
   TelegramSendError,
 } from '@/features/notifications/telegram/utils/telegram-client';
 import { loadExpenseAlertEnabled } from '@/features/notifications/services/bot-notification-settings';
-import { buildUserNotificationSnapshot } from '@/features/notifications/utils/build-user-snapshot';
+import { todayJalaaliInTimezone, formatJalaali } from '@/shared/utils/jalali';
 
 async function loadActiveConnection(userId: string): Promise<TelegramConnection | null> {
   const admin = createSupabaseAdminClient();
@@ -29,6 +30,69 @@ function expenseAmountToman(tx: Transaction): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
+async function loadCategoryName(
+  userId: string,
+  categoryId: string | null
+): Promise<string | null> {
+  if (!categoryId) return null;
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from('categories')
+    .select('name')
+    .eq('user_id', userId)
+    .eq('id', categoryId)
+    .maybeSingle();
+  return (data as { name?: string } | null)?.name?.trim() ?? null;
+}
+
+async function loadTodayExpenseTotalToman(
+  userId: string,
+  todayJalaali: string
+): Promise<number> {
+  const admin = createSupabaseAdminClient();
+  const { data: rpcTotal, error: rpcError } = await admin.rpc('get_today_expense_total_toman', {
+    p_user_id: userId,
+    p_date_string: todayJalaali,
+  });
+
+  if (!rpcError && rpcTotal != null) {
+    const parsed = Number(rpcTotal);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  const { data } = await admin
+    .from('transactions')
+    .select('amount_toman_at_time')
+    .eq('user_id', userId)
+    .eq('type', 'EXPENSE')
+    .eq('date_string', todayJalaali)
+    .not('amount_toman_at_time', 'is', null);
+
+  let total = 0;
+  for (const row of data ?? []) {
+    const value = Number((row as { amount_toman_at_time: number }).amount_toman_at_time);
+    if (Number.isFinite(value) && value > 0) total += value;
+  }
+  return total;
+}
+
+async function claimExpenseAlertDelivery(
+  userId: string,
+  transactionId: string
+): Promise<boolean> {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.from('notification_deliveries').insert({
+    user_id: userId,
+    kind: 'expense_alert',
+    dedup_key: transactionId,
+  });
+
+  if (!error) return true;
+  if (error.code === '23505') return false;
+  console.error('claimExpenseAlertDelivery failed', error);
+  return false;
+}
+
 export async function notifyExpenseTransaction(
   userId: string,
   tx: Transaction
@@ -41,39 +105,21 @@ export async function notifyExpenseTransaction(
   const alertEnabled = await loadExpenseAlertEnabled(userId);
   if (!alertEnabled) return;
 
+  const claimed = await claimExpenseAlertDelivery(userId, tx.id);
+  if (!claimed) return;
+
   const connection = await loadActiveConnection(userId);
   if (!connection) return;
 
-  const admin = createSupabaseAdminClient();
-  const [
-    { data: transactions },
-    { data: categories },
-    { data: wallets },
-    { data: assets },
-    { data: currencyRates },
-  ] = await Promise.all([
-    admin.from('transactions').select('*').eq('user_id', userId),
-    admin.from('categories').select('*').eq('user_id', userId),
-    admin.from('wallets').select('*').eq('user_id', userId).is('archived_at', null),
-    admin.from('assets').select('*').eq('user_id', userId),
-    admin.from('currency_rates').select('*').eq('user_id', userId),
+  const todayJalaali = formatJalaali(todayJalaaliInTimezone(TEHRAN_TIMEZONE));
+  const [todayTotalExpenseToman, categoryName] = await Promise.all([
+    loadTodayExpenseTotalToman(userId, todayJalaali),
+    loadCategoryName(userId, tx.category_id),
   ]);
-
-  const snapshot = buildUserNotificationSnapshot({
-    transactions: (transactions ?? []) as Transaction[],
-    categories: (categories ?? []) as Category[],
-    wallets: wallets ?? [],
-    assets: assets ?? [],
-    currencyRates: currencyRates ?? [],
-  });
-
-  const categoryName = tx.category_id
-    ? ((categories ?? []) as Category[]).find((c) => c.id === tx.category_id)?.name ?? null
-    : null;
 
   const text = formatExpenseAlertMessage({
     addedAmountToman,
-    todayTotalExpenseToman: snapshot.today.expense,
+    todayTotalExpenseToman,
     categoryName,
     note: tx.note,
   });

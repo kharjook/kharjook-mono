@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Settings } from 'lucide-react';
+import { Grid3x3, Settings } from 'lucide-react';
 import { useUI } from '@/features/portfolio/PortfolioProvider';
 import { BottomNav } from '@/features/shell/components/BottomNav';
+import { MoreHubSheet } from '@/features/shell/components/MoreHubSheet';
 import { PwaInstallPrompt } from '@/shared/components/PwaInstallPrompt';
 import { RouteTransitionBar } from '@/shared/components/RouteTransitionBar';
 import { haptic } from '@/shared/utils/haptics';
@@ -20,31 +22,43 @@ export interface ShellProps {
 export function Shell({ children, modal }: ShellProps) {
   const { currencyMode, toggleCurrency } = useUI();
   const pathname = usePathname();
+  const [moreOpen, setMoreOpen] = useState(false);
   const showNav =
     TAB_ROUTES.has(pathname) ||
     pathname === '/deadlines/loans' ||
     pathname === '/deadlines/persons';
 
   return (
-    <div className="bg-[#0F1015] text-slate-200 min-h-dvh font-sans flex justify-center selection:bg-purple-500/30">
-      <div className="w-full sm:max-w-md bg-[#161722] relative sm:shadow-2xl flex flex-col h-dvh overflow-hidden sm:border-x border-slate-800">
+    <div className="bg-background text-slate-200 min-h-dvh font-sans flex justify-center selection:bg-purple-500/30">
+      <div className="w-full sm:max-w-md bg-surface-shell relative sm:shadow-2xl flex flex-col h-dvh overflow-hidden sm:border-x border-slate-800">
         <RouteTransitionBar />
-        <header className="px-6 py-4 pt-safe flex justify-between items-center bg-[#1A1B26] border-b border-white/5 z-10">
+        <header className="px-6 py-4 pt-safe flex justify-between items-center bg-surface-raised border-b border-white/5 z-10">
           <div className="flex items-center gap-2">
             <Link
               href="/settings"
               onClick={() => haptic('selection')}
               aria-label="تنظیمات"
-              className="w-10 h-10 rounded-2xl bg-[#1A1B26] border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:border-purple-500/40 transition-colors"
+              className="w-10 h-10 rounded-2xl bg-surface-raised border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:border-purple-500/40 transition-colors"
             >
               <Settings size={18} />
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                haptic('selection');
+                setMoreOpen(true);
+              }}
+              aria-label="منوی بیشتر"
+              className="w-10 h-10 rounded-2xl bg-surface-raised border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:border-purple-500/40 transition-colors"
+            >
+              <Grid3x3 size={18} />
+            </button>
             <button
               onClick={() => {
                 haptic('selection');
                 toggleCurrency();
               }}
-              className="flex items-center gap-2 bg-[#222436] p-1 rounded-full border border-purple-500/20 transition-all hover:border-purple-500/50"
+              className="flex items-center gap-2 bg-surface-hover p-1 rounded-full border border-purple-500/20 transition-all hover:border-purple-500/50"
             >
               <div
                 className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${currencyMode === 'TOMAN' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20' : 'text-slate-400'}`}
@@ -81,6 +95,7 @@ export function Shell({ children, modal }: ShellProps) {
         {modal}
 
         {showNav && <BottomNav />}
+        <MoreHubSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
       </div>
     </div>
   );

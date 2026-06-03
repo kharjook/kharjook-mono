@@ -22,6 +22,7 @@ import { calculateAssetStats } from '@/shared/utils/calculate-asset-stats';
 import { calculateWalletStats } from '@/shared/utils/calculate-wallet-balance';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { formatCurrency } from '@/shared/utils/format-currency';
+import { formatDisplayNumber } from '@/shared/utils/format-display-number';
 import { clampPeriodToToday, currentPeriod } from '@/shared/utils/period';
 import {
   formatJalaali,
@@ -654,7 +655,7 @@ export function HomeTab() {
             </div>
             {currentMonthDeadlineSummary.rows.length > 0 && (
               <span className="rounded-full bg-amber-400/10 px-2.5 py-1 text-[10px] text-amber-200">
-                {currentMonthDeadlineSummary.rows.length.toLocaleString('fa-IR')} مورد
+                {formatDisplayNumber(currentMonthDeadlineSummary.rows.length)} مورد
               </span>
             )}
           </div>
@@ -754,7 +755,7 @@ export function HomeTab() {
           </div>
           {stats.yearUnrealizedMissingCount > 0 && (
             <p className="relative text-[10px] text-amber-400/80 mt-3">
-              {stats.yearUnrealizedMissingCount.toLocaleString('fa-IR')} دارایی بدون قیمت تاریخی؛
+              {formatDisplayNumber(stats.yearUnrealizedMissingCount)} دارایی بدون قیمت تاریخی؛
               عدد کل ناقص است.
             </p>
           )}
@@ -968,7 +969,7 @@ function HomeGoalsSection({
           </div>
           <p className="mt-1 text-[11px] text-slate-500">
             {rows.length > 0
-              ? `${metCount.toLocaleString('fa-IR')} از ${rows.length.toLocaleString('fa-IR')} رسیده`
+              ? `${formatDisplayNumber(metCount)} از ${formatDisplayNumber(rows.length)} رسیده`
               : 'هدفی تعریف نشده'}
           </p>
         </div>
@@ -996,7 +997,7 @@ function HomeGoalsSection({
                 <span className="text-[10px]">رسیده به هدف</span>
               </div>
               <p className="text-sm font-bold text-white">
-                {metCount.toLocaleString('fa-IR')}
+                {formatDisplayNumber(metCount)}
               </p>
             </div>
             <div className="rounded-xl border border-rose-500/15 bg-rose-500/5 px-3 py-2">
@@ -1005,7 +1006,7 @@ function HomeGoalsSection({
                 <span className="text-[10px]">در انتظار</span>
               </div>
               <p className="text-sm font-bold text-white">
-                {pendingCount.toLocaleString('fa-IR')}
+                {formatDisplayNumber(pendingCount)}
               </p>
             </div>
           </div>

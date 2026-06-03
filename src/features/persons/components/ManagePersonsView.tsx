@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { useToast } from '@/shared/components/Toast';
+import { EmptyState } from '@/shared/components/EmptyState';
 import type { Person } from '@/shared/types/domain';
 import { calculatePersonBalance } from '@/shared/utils/calculate-person-balance';
 
@@ -241,7 +242,11 @@ export function ManagePersonsView() {
           </SortableContext>
         </DndContext>
         {persons.length === 0 && (
-          <p className="text-center text-slate-500 text-sm">هنوز شخصی ثبت نشده.</p>
+          <EmptyState
+            icon={<UserRound size={24} />}
+            title="هنوز شخصی ثبت نشده."
+            description="از فرم بالا اولین شخص را اضافه کن."
+          />
         )}
       </div>
     </div>
