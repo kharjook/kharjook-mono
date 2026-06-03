@@ -112,6 +112,25 @@ export interface WalletSavingsPot {
   updated_at: string;
 }
 
+export interface RecurringTransaction {
+  id: string;
+  user_id: string;
+  title: string;
+  type: Extract<TransactionType, 'INCOME' | 'EXPENSE'>;
+  amount_toman: number;
+  wallet_id: string;
+  category_id: string;
+  interval_number: number;
+  interval_period: LoanIntervalPeriod;
+  next_due_date_string: string;
+  end_date_string: string | null;
+  is_active: boolean;
+  note: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Person {
   id: string;
   user_id: string;

@@ -17,6 +17,7 @@ import {
   formatMonthCashflowMessage,
   formatTodayCashflowMessage,
 } from '@/features/notifications/telegram/utils/format-today-cashflow';
+import { processRecurringTransactions } from '@/features/transactions/services/process-recurring-transactions';
 import { formatScheduledReportMessage } from '@/features/notifications/telegram/utils/format-scheduled-report';
 import { processCategoryCapAlertsForUser, sendCategoryCapsForUser } from '@/features/categories/services/category-cap-alerts';
 import {
@@ -490,13 +491,17 @@ export async function sendScheduledReportForUser(
   return true;
 }
 
-/** Daily cron at 09:00 Tehran — today's installments only, skip if none. */
+/** Daily cron at 09:00 Tehran — installments, reports, caps, recurring txs. */
 export async function processScheduledNotifications(): Promise<{
   debtsDigestsSent: number;
   reportsDigestsSent: number;
   categoryCapAlertsSent: number;
+  recurringTransactionsCreated: number;
   errors: string[];
 }> {
+  const recurringResult = await processRecurringTransactions();
+  const errors: string[] = [...recurringResult.errors];
+
   const admin = createSupabaseAdminClient();
   const { data: connections } = await admin
     .from('telegram_connections')
@@ -505,7 +510,13 @@ export async function processScheduledNotifications(): Promise<{
 
   const activeConnections = (connections ?? []) as TelegramConnection[];
   if (activeConnections.length === 0) {
-    return { debtsDigestsSent: 0, reportsDigestsSent: 0, categoryCapAlertsSent: 0, errors: [] };
+    return {
+      debtsDigestsSent: 0,
+      reportsDigestsSent: 0,
+      categoryCapAlertsSent: 0,
+      recurringTransactionsCreated: recurringResult.created,
+      errors,
+    };
   }
 
   const userIds = activeConnections.map((conn) => conn.user_id);
@@ -550,7 +561,6 @@ export async function processScheduledNotifications(): Promise<{
   let debtsDigestsSent = 0;
   let reportsDigestsSent = 0;
   let categoryCapAlertsSent = 0;
-  const errors: string[] = [];
 
   for (const conn of activeConnections) {
     const enabled = enabledByUser.get(conn.user_id) ?? BOT_DEFAULT_NOTIFICATION_SETTINGS.enabled;
@@ -588,7 +598,13 @@ export async function processScheduledNotifications(): Promise<{
     }
   }
 
-  return { debtsDigestsSent, reportsDigestsSent, categoryCapAlertsSent, errors };
+  return {
+    debtsDigestsSent,
+    reportsDigestsSent,
+    categoryCapAlertsSent,
+    recurringTransactionsCreated: recurringResult.created,
+    errors,
+  };
 }
 
 export { sendCategoryCapsForUser };

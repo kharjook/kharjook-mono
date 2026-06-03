@@ -5,6 +5,7 @@ import {
   BarChart3,
   Coins,
   LayoutGrid,
+  Repeat,
   Target,
   TrendingUp,
   X,
@@ -40,6 +41,12 @@ const LINKS = [
     title: 'اهداف تخصیص',
     subtitle: 'درصد یا مقدار هدف',
     icon: Target,
+  },
+  {
+    href: '/manage/recurring',
+    title: 'تراکنش‌های دوره‌ای',
+    subtitle: 'حقوق، اجاره و … — ثبت خودکار',
+    icon: Repeat,
   },
   {
     href: '/manage/categories',

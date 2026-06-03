@@ -12,6 +12,8 @@ export async function createBotWalletTransaction(input: {
   walletId: string;
   categoryId: string;
   note?: string;
+  dateString?: string;
+  notifyExpense?: boolean;
 }): Promise<{ ok: true; transactionId: string } | { ok: false; error: string }> {
   if (!(input.amountToman > 0)) {
     return { ok: false, error: 'مبلغ نامعتبر است.' };
@@ -55,7 +57,9 @@ export async function createBotWalletTransaction(input: {
 
   const walletAmount =
     wallet.currency === 'IRT' ? input.amountToman : input.amountToman / walletRate;
-  const date_string = formatJalaali(todayJalaaliInTimezone(TEHRAN_TIMEZONE));
+  const date_string =
+    input.dateString?.trim() ||
+    formatJalaali(todayJalaaliInTimezone(TEHRAN_TIMEZONE));
 
   const base = {
     user_id: input.userId,
@@ -95,7 +99,7 @@ export async function createBotWalletTransaction(input: {
   const { data, error } = await admin.from('transactions').insert(payload).select().single();
   if (error || !data) return { ok: false, error: 'ثبت تراکنش ناموفق بود.' };
 
-  if (input.type === 'EXPENSE') {
+  if (input.type === 'EXPENSE' && input.notifyExpense !== false) {
     await notifyExpenseTransaction(input.userId, data as Transaction);
   }
 

@@ -25,6 +25,11 @@ import {
   TransactionHistoryTypeFilter,
   type TxHistoryTypeFilter,
 } from '@/features/transactions/components/TransactionHistoryTypeFilter';
+import { TransactionHistorySearchBar } from '@/features/transactions/components/TransactionHistorySearchBar';
+import {
+  convertGroupMatchesSearch,
+  transactionMatchesSearch,
+} from '@/features/transactions/utils/transaction-history-search';
 import {
   ConvertTransactionCard,
   convertGroupsForAsset,
@@ -51,9 +56,10 @@ export interface AssetDetailsViewProps {
 export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
   const router = useRouter();
   const toast = useToast();
-  const { assets, categories, transactions, goals, setTransactions } = useData();
+  const { assets, categories, transactions, goals, setTransactions, wallets } = useData();
   const { currencyMode, usdRate } = useUI();
   const [txTypeFilter, setTxTypeFilter] = useState<TxHistoryTypeFilter>('ALL');
+  const [txSearchQuery, setTxSearchQuery] = useState('');
 
   const asset = assets.find((a) => a.id === assetId);
 
@@ -80,6 +86,11 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
     () => transactionIdsInConvertGroups(transactions),
     [transactions]
   );
+  const historyLookup = useMemo(
+    () => ({ wallets, assets, categories }),
+    [wallets, assets, categories]
+  );
+
   const assetHistoryItems = useMemo(() => {
     type HistoryItem =
       | { kind: 'convert'; date: string; group: ConvertTransactionGroup }
@@ -92,15 +103,25 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
           (txTypeFilter === 'BUY' && group.buy.target_asset_id === assetId);
         if (!matches) continue;
       }
+      if (!convertGroupMatchesSearch(group, txSearchQuery, historyLookup)) continue;
       items.push({ kind: 'convert', date: group.sell.date_string, group });
     }
     for (const tx of visibleAssetTxs) {
       if (convertTxIds.has(tx.id)) continue;
+      if (!transactionMatchesSearch(tx, txSearchQuery, historyLookup)) continue;
       items.push({ kind: 'tx', date: tx.date_string, tx });
     }
     items.sort((a, b) => b.date.localeCompare(a.date));
     return items;
-  }, [convertGroups, visibleAssetTxs, convertTxIds, txTypeFilter, assetId]);
+  }, [
+    convertGroups,
+    visibleAssetTxs,
+    convertTxIds,
+    txTypeFilter,
+    txSearchQuery,
+    historyLookup,
+    assetId,
+  ]);
 
   const snapshots = useMemo(
     () => buildAssetSnapshots(assets, transactions, currencyMode, usdRate),
@@ -400,7 +421,11 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             <h3 className="text-lg font-semibold text-white">تاریخچه عملیات</h3>
           </div>
           {assetTxsSorted.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-4 space-y-3">
+              <TransactionHistorySearchBar
+                value={txSearchQuery}
+                onChange={setTxSearchQuery}
+              />
               <TransactionHistoryTypeFilter
                 value={txTypeFilter}
                 onChange={setTxTypeFilter}
@@ -415,7 +440,9 @@ export function AssetDetailsView({ assetId }: AssetDetailsViewProps) {
             )}
             {assetTxsSorted.length > 0 && visibleAssetTxs.length === 0 && assetHistoryItems.length === 0 && (
               <div className="text-center text-slate-500 text-sm py-4">
-                تراکنشی با این نوع وجود ندارد.
+                {txSearchQuery.trim()
+                  ? 'تراکنشی با این جستجو پیدا نشد.'
+                  : 'تراکنشی با این نوع وجود ندارد.'}
               </div>
             )}
             {assetHistoryItems.map((item) => {

@@ -45,6 +45,11 @@ import {
   TransactionHistoryTypeFilter,
   type TxHistoryTypeFilter,
 } from '@/features/transactions/components/TransactionHistoryTypeFilter';
+import { TransactionHistorySearchBar } from '@/features/transactions/components/TransactionHistorySearchBar';
+import {
+  convertGroupMatchesSearch,
+  transactionMatchesSearch,
+} from '@/features/transactions/utils/transaction-history-search';
 
 const TYPE_LABELS: Record<TransactionType, string> = {
   BUY: 'خرید',
@@ -72,6 +77,7 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
   } = useData();
   const { currencyMode, usdRate } = useUI();
   const [txTypeFilter, setTxTypeFilter] = useState<TxHistoryTypeFilter>('ALL');
+  const [txSearchQuery, setTxSearchQuery] = useState('');
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
 
   const wallet = wallets.find((w) => w.id === walletId);
@@ -99,6 +105,11 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
     () => transactionIdsInConvertGroups(transactions),
     [transactions]
   );
+  const historyLookup = useMemo(
+    () => ({ wallets, assets, categories }),
+    [wallets, assets, categories]
+  );
+
   const walletHistoryItems = useMemo(() => {
     if (!stats) return [];
     type HistoryItem =
@@ -112,15 +123,26 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
           (txTypeFilter === 'BUY' && group.buy.source_wallet_id === walletId);
         if (!matches) continue;
       }
+      if (!convertGroupMatchesSearch(group, txSearchQuery, historyLookup)) continue;
       items.push({ kind: 'convert', date: group.sell.date_string, group });
     }
     for (const tx of visibleWalletTxs) {
       if (convertTxIds.has(tx.id)) continue;
+      if (!transactionMatchesSearch(tx, txSearchQuery, historyLookup)) continue;
       items.push({ kind: 'tx', date: tx.date_string, tx });
     }
     items.sort((a, b) => b.date.localeCompare(a.date));
     return items;
-  }, [stats, convertGroups, visibleWalletTxs, convertTxIds, txTypeFilter, walletId]);
+  }, [
+    stats,
+    convertGroups,
+    visibleWalletTxs,
+    convertTxIds,
+    txTypeFilter,
+    txSearchQuery,
+    historyLookup,
+    walletId,
+  ]);
 
   if (!wallet || !stats) {
     return (
@@ -290,7 +312,11 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
         <div className="pt-2">
           <h3 className="text-lg font-semibold text-white mb-3">تاریخچه تراکنش‌ها</h3>
           {stats.transactions.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-4 space-y-3">
+              <TransactionHistorySearchBar
+                value={txSearchQuery}
+                onChange={setTxSearchQuery}
+              />
               <TransactionHistoryTypeFilter
                 value={txTypeFilter}
                 onChange={setTxTypeFilter}
@@ -305,7 +331,9 @@ export function WalletDetailsView({ walletId }: WalletDetailsViewProps) {
             )}
             {stats.transactions.length > 0 && visibleWalletTxs.length === 0 && walletHistoryItems.length === 0 && (
               <div className="text-center text-slate-500 text-sm py-6">
-                تراکنشی با این نوع وجود ندارد.
+                {txSearchQuery.trim()
+                  ? 'تراکنشی با این جستجو پیدا نشد.'
+                  : 'تراکنشی با این نوع وجود ندارد.'}
               </div>
             )}
             {walletHistoryItems.map((item) => {
