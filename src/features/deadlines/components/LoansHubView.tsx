@@ -30,6 +30,14 @@ import {
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { CURRENCY_META } from '@/features/wallets/constants/currency-meta';
 import { ListSheetPicker } from '@/shared/components/ListSheetPicker';
+import {
+  canonicalInstallmentAmount,
+  installmentHasPartialPay,
+  installmentPaidAmount,
+  installmentRemainingAmount,
+  parsePartialPayAmount,
+  validatePartialPayAmount,
+} from '@/features/deadlines/utils/installment-remaining';
 
 type TabKey = 'loans' | 'installments' | 'calendar';
 type InstallmentFilter = 'all' | 'paid' | 'remaining';
@@ -64,6 +72,7 @@ export function LoansHubView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [settlementTarget, setSettlementTarget] = useState<LoanInstallment | null>(null);
   const [settlementWalletId, setSettlementWalletId] = useState<string | null>(null);
+  const [settlementPayAmount, setSettlementPayAmount] = useState('');
   const [isSettlementPickerOpen, setIsSettlementPickerOpen] = useState(false);
   const [loanFilter, setLoanFilter] = useState<LoanFilter>('remaining');
   const [installmentFilter, setInstallmentFilter] = useState<InstallmentFilter>('remaining');
@@ -136,12 +145,11 @@ export function LoansHubView() {
 
   const displayAmount = useCallback(
     (row: InstallmentRow) => {
-      const toman = loanAmountToToman(
-        row.installment.amount,
-        row.loan.currency,
-        currencyRates
-      );
-      if (!(toman > 0)) return row.installment.amount;
+      const principal = row.installment.is_paid
+        ? row.installment.amount
+        : installmentRemainingAmount(row.installment);
+      const toman = loanAmountToToman(principal, row.loan.currency, currencyRates);
+      if (!(toman > 0)) return principal;
       if (currencyMode === 'USD' && usdRate > 0) {
         return toman / usdRate;
       }
@@ -258,7 +266,7 @@ export function LoansHubView() {
     for (const row of remainingRows) {
       const rate = tomanPerUnit(row.loan.currency, currencyRates);
       if (!(rate > 0)) continue;
-      totalToman += row.installment.amount * rate;
+      totalToman += installmentRemainingAmount(row.installment) * rate;
     }
     if (currencyMode === 'USD') {
       return usdRate > 0 ? totalToman / usdRate : 0;
@@ -281,12 +289,14 @@ export function LoansHubView() {
   const openSettle = (installment: LoanInstallment) => {
     setSettlementTarget(installment);
     setSettlementWalletId(null);
+    setSettlementPayAmount(canonicalInstallmentAmount(installmentRemainingAmount(installment)));
     setIsSettlementPickerOpen(true);
   };
 
   const closeSettle = () => {
     setSettlementTarget(null);
     setSettlementWalletId(null);
+    setSettlementPayAmount('');
     setIsSettlementPickerOpen(false);
   };
 
@@ -328,6 +338,18 @@ export function LoansHubView() {
       return;
     }
 
+    const remaining = installmentRemainingAmount(settlementTarget);
+    const payInLoanCurrency = parsePartialPayAmount(settlementPayAmount);
+    if (!payInLoanCurrency) {
+      toast.error('مبلغ پرداخت نامعتبر است.');
+      return;
+    }
+    const amountError = validatePartialPayAmount(payInLoanCurrency, remaining);
+    if (amountError) {
+      toast.error(amountError);
+      return;
+    }
+
     const loanRate = tomanPerUnit(loan.currency, currencyRates);
     const payRate = tomanPerUnit(wallet.currency, currencyRates);
     if (loanRate <= 0 || payRate <= 0 || usdRate <= 0) {
@@ -335,7 +357,7 @@ export function LoansHubView() {
       return;
     }
 
-    const payAmount = (settlementTarget.amount * loanRate) / payRate;
+    const payAmount = (payInLoanCurrency * loanRate) / payRate;
     if (!Number.isFinite(payAmount) || payAmount <= 0) {
       toast.error('مبلغ تسویه نامعتبر است.');
       return;
@@ -371,19 +393,24 @@ export function LoansHubView() {
       if (txErr) throw txErr;
       const createdTx = txData as Transaction;
 
+      const newPaidAmount = installmentPaidAmount(settlementTarget) + payInLoanCurrency;
+      const fullyPaid = newPaidAmount >= Number(settlementTarget.amount) - 1e-9;
+
       const { error: installmentErr } = await supabase
         .from('loan_installments')
         .update({
-          is_paid: true,
-          paid_at: new Date().toISOString(),
+          paid_amount: newPaidAmount,
+          is_paid: fullyPaid,
+          paid_at: fullyPaid ? new Date().toISOString() : settlementTarget.paid_at,
           paid_transaction_id: createdTx.id,
         })
-        .eq('id', settlementTarget.id);
+        .eq('id', settlementTarget.id)
+        .eq('is_paid', false);
       if (installmentErr) throw installmentErr;
 
       setTransactions((prev) => [createdTx, ...prev]);
       fireExpenseAlert([createdTx.id]);
-      toast.success('قسط تسویه شد و تراکنش ثبت شد.');
+      toast.success(fullyPaid ? 'قسط تسویه شد و تراکنش ثبت شد.' : 'پرداخت جزئی ثبت شد.');
       closeSettle();
       await refresh();
     } catch (error) {
@@ -669,6 +696,9 @@ export function LoansHubView() {
                       <p className="text-xs text-slate-300 mt-1" dir="ltr">
                         {formatCurrency(amountDisplay, currencyMode)}
                       </p>
+                      {installmentHasPartialPay(installment) && (
+                        <p className="text-[10px] text-amber-300 mt-1">پرداخت جزئی</p>
+                      )}
                     </div>
 
                     {installment.is_paid ? (
@@ -794,6 +824,9 @@ export function LoansHubView() {
                       <p className="text-xs text-slate-200 mt-1" dir="ltr">
                         {formatCurrency(displayAmount(row), currencyMode)}
                       </p>
+                      {installmentHasPartialPay(row.installment) && (
+                        <p className="text-[10px] text-amber-300 mt-1">پرداخت جزئی</p>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -823,13 +856,35 @@ export function LoansHubView() {
         }}
       />
 
-      {settlementTarget && (
+      {settlementTarget && (() => {
+        const settleLoan = loansById.get(settlementTarget.loan_id);
+        const currencyLabel = settleLoan ? CURRENCY_META[settleLoan.currency].label : '';
+        const remaining = installmentRemainingAmount(settlementTarget);
+        return (
         <div className="fixed inset-x-0 bottom-24 px-6 sm:max-w-md sm:mx-auto z-40">
-          <div className="bg-[#13141C] border border-white/10 rounded-2xl p-3 shadow-2xl flex items-center gap-2">
+          <div className="bg-[#13141C] border border-white/10 rounded-2xl p-3 shadow-2xl space-y-2">
+            <div>
+              <label className="text-[11px] text-slate-500 block mb-1">
+                مبلغ پرداخت ({currencyLabel})
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={settlementPayAmount}
+                onChange={(e) => setSettlementPayAmount(e.target.value)}
+                disabled={isSubmitting}
+                dir="ltr"
+                className="w-full bg-[#222436] border border-white/5 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-purple-500 disabled:opacity-50"
+              />
+              <p className="text-[10px] text-slate-500 mt-1" dir="ltr">
+                باقی‌مانده: {canonicalInstallmentAmount(remaining)} {currencyLabel}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleSettle}
-              disabled={isSubmitting || !settlementWalletId}
+              disabled={isSubmitting || !settlementWalletId || !settlementPayAmount.trim()}
               className="flex-1 px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium disabled:opacity-50"
             >
               {isSubmitting ? (
@@ -838,7 +893,7 @@ export function LoansHubView() {
                   در حال تسویه...
                 </span>
               ) : (
-                selectedSettlementWallet ? `ثبت تسویه با ${selectedSettlementWallet.name}` : 'ثبت تسویه'
+                selectedSettlementWallet ? `ثبت با ${selectedSettlementWallet.name}` : 'ثبت پرداخت'
               )}
             </button>
             <button
@@ -847,7 +902,7 @@ export function LoansHubView() {
               disabled={isSubmitting}
               className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm disabled:opacity-50"
             >
-              {selectedSettlementWallet ? selectedSettlementWallet.name : 'انتخاب کیف پول'}
+              {selectedSettlementWallet ? selectedSettlementWallet.name : 'کیف پول'}
             </button>
             <button
               type="button"
@@ -856,9 +911,11 @@ export function LoansHubView() {
             >
               انصراف
             </button>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

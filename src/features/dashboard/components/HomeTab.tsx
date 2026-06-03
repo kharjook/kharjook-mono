@@ -24,6 +24,7 @@ import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 import { formatCurrency } from '@/shared/utils/format-currency';
 import { formatDisplayNumber } from '@/shared/utils/format-display-number';
 import { clampPeriodToToday, currentPeriod } from '@/shared/utils/period';
+import { installmentRemainingAmount } from '@/features/deadlines/utils/installment-remaining';
 import {
   formatJalaali,
   formatJalaaliHuman,
@@ -562,7 +563,7 @@ export function HomeTab() {
       item: LoanInstallment & { loanCurrency?: Loan['currency'] }
     ) => {
       const rate = tomanPerUnit(item.loanCurrency ?? 'IRT', currencyRates);
-      const toman = item.amount * (rate > 0 ? rate : 0);
+      const toman = installmentRemainingAmount(item) * (rate > 0 ? rate : 0);
       if (currencyMode === 'USD' && usdRate > 0) return toman / usdRate;
       return toman;
     };

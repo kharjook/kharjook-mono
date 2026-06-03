@@ -12,6 +12,7 @@ import type {
   Wallet,
 } from '@/shared/types/domain';
 import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
+import { installmentRemainingAmount } from '@/features/deadlines/utils/installment-remaining';
 import { buildUserNotificationSnapshot } from '@/features/notifications/utils/build-user-snapshot';
 import {
   formatMonthCashflowMessage,
@@ -141,7 +142,7 @@ async function loadUnpaidDebtItems(userId: string): Promise<DebtListItem[]> {
       loanId: row.loan_id,
       loanTitle: loan.title,
       dueDateString: row.due_date_string,
-      amountToman: row.amount * rate,
+      amountToman: installmentRemainingAmount(row) * rate,
       daysUntilDue: daysUntil,
       reminderDaysBefore: loan.reminder_days_before ?? [],
     });

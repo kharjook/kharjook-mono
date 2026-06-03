@@ -346,6 +346,7 @@ export interface LoanInstallment {
   loan_id: string;
   due_date_string: string;
   amount: number;
+  paid_amount: number;
   sequence_no: number;
   is_paid: boolean;
   paid_at: string | null;

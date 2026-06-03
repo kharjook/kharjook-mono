@@ -1,16 +1,23 @@
 import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
-import type { Loan, LoanInstallment, Transaction, Wallet } from '@/shared/types/domain';
+import {
+  installmentPaidAmount,
+  installmentRemainingAmount,
+  validatePartialPayAmount,
+} from '@/features/deadlines/utils/installment-remaining';
 import { notifyExpenseTransaction } from '@/features/notifications/services/notify-expense-transaction';
+import type { Loan, LoanInstallment, Transaction, Wallet } from '@/shared/types/domain';
 import { tomanPerUnit } from '@/shared/utils/currency-conversion';
 
 export type SettleInstallmentResult =
-  | { ok: true; transactionId: string }
+  | { ok: true; transactionId: string; fullyPaid: boolean }
   | { ok: false; error: string; code: 'not_found' | 'already_paid' | 'invalid' | 'db' };
 
 export async function settleLoanInstallment(input: {
   userId: string;
   installmentId: string;
   walletId: string;
+  /** In loan currency; defaults to remaining balance. */
+  payAmountInLoanCurrency?: number;
 }): Promise<SettleInstallmentResult> {
   const admin = createSupabaseAdminClient();
 
@@ -28,6 +35,17 @@ export async function settleLoanInstallment(input: {
   const installment = installmentRow as LoanInstallment;
   if (installment.is_paid) {
     return { ok: false, error: 'این قسط قبلاً پرداخت شده.', code: 'already_paid' };
+  }
+
+  const remaining = installmentRemainingAmount(installment);
+  if (!(remaining > 0)) {
+    return { ok: false, error: 'این قسط قبلاً پرداخت شده.', code: 'already_paid' };
+  }
+
+  const payInLoanCurrency = input.payAmountInLoanCurrency ?? remaining;
+  const amountError = validatePartialPayAmount(payInLoanCurrency, remaining);
+  if (amountError) {
+    return { ok: false, error: amountError, code: 'invalid' };
   }
 
   const [{ data: loanRow }, { data: walletRow }, { data: ratesRows }] = await Promise.all([
@@ -63,7 +81,7 @@ export async function settleLoanInstallment(input: {
     return { ok: false, error: 'نرخ تبدیل برای تسویه در دسترس نیست.', code: 'invalid' };
   }
 
-  const payAmount = (installment.amount * loanRate) / payRate;
+  const payAmount = (payInLoanCurrency * loanRate) / payRate;
   if (!Number.isFinite(payAmount) || payAmount <= 0) {
     return { ok: false, error: 'مبلغ تسویه نامعتبر است.', code: 'invalid' };
   }
@@ -99,11 +117,15 @@ export async function settleLoanInstallment(input: {
   }
 
   const createdTx = txData as Transaction;
+  const actuallyNewPaid = installmentPaidAmount(installment) + payInLoanCurrency;
+  const fullyPaid = actuallyNewPaid >= Number(installment.amount) - 1e-9;
+
   const { error: installmentErr } = await admin
     .from('loan_installments')
     .update({
-      is_paid: true,
-      paid_at: new Date().toISOString(),
+      paid_amount: actuallyNewPaid,
+      is_paid: fullyPaid,
+      paid_at: fullyPaid ? new Date().toISOString() : installment.paid_at,
       paid_transaction_id: createdTx.id,
     })
     .eq('id', installment.id)
@@ -115,5 +137,5 @@ export async function settleLoanInstallment(input: {
 
   await notifyExpenseTransaction(input.userId, createdTx);
 
-  return { ok: true, transactionId: createdTx.id };
+  return { ok: true, transactionId: createdTx.id, fullyPaid };
 }
