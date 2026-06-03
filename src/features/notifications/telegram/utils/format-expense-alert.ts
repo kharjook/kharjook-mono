@@ -8,6 +8,7 @@ export function formatExpenseAlertMessage(input: {
   todayTotalExpenseToman: number;
   categoryName?: string | null;
   note?: string | null;
+  capLine?: string | null;
 }): string {
   const lines = [
     '🔴 هزینه ثبت شد',
@@ -20,6 +21,10 @@ export function formatExpenseAlertMessage(input: {
   }
   if (input.note?.trim()) {
     lines.push(`📝 ${input.note.trim()}`);
+  }
+  if (input.capLine?.trim()) {
+    lines.push('');
+    lines.push(input.capLine.trim());
   }
 
   lines.push(

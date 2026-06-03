@@ -7,6 +7,8 @@ import {
   TelegramSendError,
 } from '@/features/notifications/telegram/utils/telegram-client';
 import { loadExpenseAlertEnabled } from '@/features/notifications/services/bot-notification-settings';
+import { findCapStatusForCategory } from '@/features/categories/services/category-cap-alerts';
+import { formatExpenseCapLine } from '@/features/notifications/telegram/utils/format-category-caps';
 import { todayJalaaliInTimezone, formatJalaali } from '@/shared/utils/jalali';
 
 async function loadActiveConnection(userId: string): Promise<TelegramConnection | null> {
@@ -112,16 +114,28 @@ export async function notifyExpenseTransaction(
   if (!connection) return;
 
   const todayJalaali = formatJalaali(todayJalaaliInTimezone(TEHRAN_TIMEZONE));
-  const [todayTotalExpenseToman, categoryName] = await Promise.all([
+  const [todayTotalExpenseToman, categoryName, capStatus] = await Promise.all([
     loadTodayExpenseTotalToman(userId, todayJalaali),
     loadCategoryName(userId, tx.category_id),
+    findCapStatusForCategory(userId, tx.category_id),
   ]);
+
+  const capLine =
+    capStatus && capStatus.percent >= 80
+      ? formatExpenseCapLine({
+          categoryName: capStatus.categoryName,
+          spentToman: capStatus.spentToman,
+          limitToman: capStatus.limitToman,
+          percent: capStatus.percent,
+        })
+      : null;
 
   const text = formatExpenseAlertMessage({
     addedAmountToman,
     todayTotalExpenseToman,
     categoryName,
     note: tx.note,
+    capLine,
   });
 
   try {
@@ -132,6 +146,7 @@ export async function notifyExpenseTransaction(
     } else {
       console.error('notifyExpenseTransaction failed', err);
     }
+    return;
   }
 }
 

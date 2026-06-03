@@ -18,6 +18,7 @@ import {
   formatTodayCashflowMessage,
 } from '@/features/notifications/telegram/utils/format-today-cashflow';
 import { formatScheduledReportMessage } from '@/features/notifications/telegram/utils/format-scheduled-report';
+import { processCategoryCapAlertsForUser, sendCategoryCapsForUser } from '@/features/categories/services/category-cap-alerts';
 import {
   DEFAULT_REPORT_SETTINGS,
   type ReportNotificationSettings,
@@ -493,6 +494,7 @@ export async function sendScheduledReportForUser(
 export async function processScheduledNotifications(): Promise<{
   debtsDigestsSent: number;
   reportsDigestsSent: number;
+  categoryCapAlertsSent: number;
   errors: string[];
 }> {
   const admin = createSupabaseAdminClient();
@@ -503,7 +505,7 @@ export async function processScheduledNotifications(): Promise<{
 
   const activeConnections = (connections ?? []) as TelegramConnection[];
   if (activeConnections.length === 0) {
-    return { debtsDigestsSent: 0, reportsDigestsSent: 0, errors: [] };
+    return { debtsDigestsSent: 0, reportsDigestsSent: 0, categoryCapAlertsSent: 0, errors: [] };
   }
 
   const userIds = activeConnections.map((conn) => conn.user_id);
@@ -547,6 +549,7 @@ export async function processScheduledNotifications(): Promise<{
 
   let debtsDigestsSent = 0;
   let reportsDigestsSent = 0;
+  let categoryCapAlertsSent = 0;
   const errors: string[] = [];
 
   for (const conn of activeConnections) {
@@ -560,6 +563,15 @@ export async function processScheduledNotifications(): Promise<{
           `${conn.user_id}:debts:${err instanceof Error ? err.message : String(err)}`
         );
       }
+    }
+
+    try {
+      const sent = await processCategoryCapAlertsForUser(conn.user_id, conn);
+      categoryCapAlertsSent += sent;
+    } catch (err) {
+      errors.push(
+        `${conn.user_id}:caps:${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     const reportSettings =
@@ -576,7 +588,9 @@ export async function processScheduledNotifications(): Promise<{
     }
   }
 
-  return { debtsDigestsSent, reportsDigestsSent, errors };
+  return { debtsDigestsSent, reportsDigestsSent, categoryCapAlertsSent, errors };
 }
+
+export { sendCategoryCapsForUser };
 
 export { loadUnpaidDebtItems };

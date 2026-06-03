@@ -48,6 +48,8 @@ import { MonthlyCashflowChart } from '@/features/dashboard/components/MonthlyCas
 import { TopAllocationCard } from '@/features/dashboard/components/TopAllocationCard';
 import { DistributionChartCard } from '@/features/dashboard/components/DistributionChartCard';
 import { buildYearCashflowByMonth } from '@/features/dashboard/utils/year-cashflow';
+import { CategoryCapsWidget } from '@/features/dashboard/components/CategoryCapsWidget';
+import type { CategorySpendingCap } from '@/shared/types/domain';
 
 export type HomeGoalRow = {
   id: string;
@@ -78,6 +80,20 @@ export function HomeTab() {
   const [upcomingDeadlines, setUpcomingDeadlines] = useState<
     Array<LoanInstallment & { loanTitle?: string; loanCurrency?: Loan['currency'] }>
   >([]);
+  const [spendingCaps, setSpendingCaps] = useState<CategorySpendingCap[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+    void (async () => {
+      const { data } = await supabase.from('category_spending_caps').select('*');
+      if (!mounted) return;
+      setSpendingCaps((data ?? []) as CategorySpendingCap[]);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -616,6 +632,8 @@ export function HomeTab() {
         yearLabel={yearLabel}
         onOpenReports={() => router.push('/reports/cashflow')}
       />
+
+      <CategoryCapsWidget caps={spendingCaps} />
 
       <div className="grid grid-cols-2 gap-3">
         <MetricCard

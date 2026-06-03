@@ -1,3 +1,4 @@
+import { sendCategoryCapsForUser } from '@/features/categories/services/category-cap-alerts';
 import {
   refreshAndReportPricesForUser,
   sendMonthCashflowForUser,
@@ -40,6 +41,7 @@ import {
   BOT_WELCOME_LINKED,
   BOT_WELCOME_UNLINKED,
   BTN_BACK,
+  BTN_CASHFLOW_CAPS,
   BTN_CASHFLOW_MONTH,
   BTN_CASHFLOW_TODAY,
   BTN_GET_PRICES,
@@ -242,6 +244,13 @@ export async function handleBotMessage(chatId: number, text: string): Promise<vo
       await sendMonthCashflowForUser(userId, conn, {
         replyMarkup: keyboardForMenu('cashflow'),
       });
+    });
+    return;
+  }
+
+  if (text === BTN_CASHFLOW_CAPS) {
+    await runCashflowAction(chatId, async (userId, conn) => {
+      await sendCategoryCapsForUser(userId, conn);
     });
     return;
   }

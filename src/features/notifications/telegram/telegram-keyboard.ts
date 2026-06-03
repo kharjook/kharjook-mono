@@ -12,6 +12,7 @@ export const BTN_MENU_SETTINGS = '⚙️ تنظیمات';
 /** Cashflow submenu */
 export const BTN_CASHFLOW_TODAY = '📅 امروز';
 export const BTN_CASHFLOW_MONTH = '📆 این ماه';
+export const BTN_CASHFLOW_CAPS = '🎯 سقف دسته‌ها';
 
 /** Reports submenu */
 export const BTN_PORTFOLIO = '💼 ارزش پرتفوی';
@@ -40,6 +41,7 @@ export const ALL_BOT_BUTTONS = new Set([
   BTN_MENU_SETTINGS,
   BTN_CASHFLOW_TODAY,
   BTN_CASHFLOW_MONTH,
+  BTN_CASHFLOW_CAPS,
   BTN_PORTFOLIO,
   BTN_MONTH_DEBTS,
   BTN_OVERDUE_DEBTS,
@@ -80,7 +82,11 @@ export function buildMainReplyKeyboard(): TelegramReplyMarkup {
 
 export function buildCashflowReplyKeyboard(): TelegramReplyMarkup {
   return {
-    keyboard: [[{ text: BTN_CASHFLOW_TODAY }, { text: BTN_CASHFLOW_MONTH }], [{ text: BTN_BACK }]],
+    keyboard: [
+      [{ text: BTN_CASHFLOW_TODAY }, { text: BTN_CASHFLOW_MONTH }],
+      [{ text: BTN_CASHFLOW_CAPS }],
+      [{ text: BTN_BACK }],
+    ],
     resize_keyboard: true,
     is_persistent: true,
     input_field_placeholder: 'بازه را انتخاب کنید',

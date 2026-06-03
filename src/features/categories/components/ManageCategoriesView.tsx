@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
@@ -30,10 +30,11 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { supabase } from '@/shared/lib/supabase/client';
 import { CategorySheetPicker } from '@/shared/components/CategorySheetPicker';
+import { FormattedNumberInput } from '@/shared/components/FormattedNumberInput';
 import { useToast } from '@/shared/components/Toast';
 import { runOptimisticMutation } from '@/shared/utils/optimistic-mutation';
 import { haptic } from '@/shared/utils/haptics';
-import type { Category, CategoryKind } from '@/shared/types/domain';
+import type { Category, CategoryKind, CategorySpendingCap } from '@/shared/types/domain';
 import { useAuth, useData } from '@/features/portfolio/PortfolioProvider';
 import { CATEGORY_COLORS } from '@/features/categories/constants/category-colors';
 
@@ -42,6 +43,7 @@ type FormState = {
   name: string;
   color: string;
   parentId: string | null;
+  monthlyCapToman: string;
 };
 
 const KIND_TABS: { id: CategoryKind; label: string }[] = [
@@ -61,6 +63,7 @@ const emptyForm: FormState = {
   name: '',
   color: CATEGORY_COLORS[0],
   parentId: null,
+  monthlyCapToman: '',
 };
 
 export function ManageCategoriesView() {
@@ -74,6 +77,24 @@ export function ManageCategoriesView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [pendingCategoryIds, setPendingCategoryIds] = useState<Set<string>>(new Set());
+  const [capsByCategoryId, setCapsByCategoryId] = useState<Map<string, CategorySpendingCap>>(
+    new Map()
+  );
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.from('category_spending_caps').select('*');
+      if (cancelled || error) return;
+      setCapsByCategoryId(
+        new Map(((data ?? []) as CategorySpendingCap[]).map((cap) => [cap.category_id, cap]))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Categories scoped to the current tab.
   const scoped = useMemo(
@@ -153,6 +174,45 @@ export function ManageCategoriesView() {
 
   const resetForm = () => setForm(emptyForm);
 
+  const persistCategoryCap = async (categoryId: string, rawLimit: string) => {
+    const trimmed = rawLimit.trim();
+    if (!trimmed) {
+      const { error } = await supabase
+        .from('category_spending_caps')
+        .delete()
+        .eq('category_id', categoryId);
+      if (error) throw error;
+      setCapsByCategoryId((prev) => {
+        const next = new Map(prev);
+        next.delete(categoryId);
+        return next;
+      });
+      return;
+    }
+
+    const limit = Number(trimmed);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      throw new Error('سقف ماهانه نامعتبر است.');
+    }
+
+    const { data, error } = await supabase
+      .from('category_spending_caps')
+      .upsert(
+        {
+          user_id: user!.id,
+          category_id: categoryId,
+          monthly_limit_toman: limit,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,category_id' }
+      )
+      .select()
+      .single();
+    if (error) throw error;
+    const saved = data as CategorySpendingCap;
+    setCapsByCategoryId((prev) => new Map(prev).set(categoryId, saved));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = form.name.trim();
@@ -210,6 +270,9 @@ export function ManageCategoriesView() {
             );
           },
         });
+        if (activeKind === 'expense') {
+          await persistCategoryCap(editingId, form.monthlyCapToman);
+        }
       } else {
         const nextOrder =
           scoped
@@ -220,6 +283,7 @@ export function ManageCategoriesView() {
             ) + 1;
         const snapshot = categories;
         const tempId = `temp-category-${crypto.randomUUID()}`;
+        let savedCategoryId: string | null = null;
         const optimisticCategory: Category = {
           id: tempId,
           user_id: user.id,
@@ -263,6 +327,7 @@ export function ManageCategoriesView() {
             return data as Category;
           },
           onSuccess: (saved) => {
+            savedCategoryId = saved.id;
             setPendingCategoryIds((p) => {
               const next = new Set(p);
               next.delete(tempId);
@@ -273,6 +338,9 @@ export function ManageCategoriesView() {
             );
           },
         });
+        if (activeKind === 'expense' && form.monthlyCapToman.trim() && savedCategoryId) {
+          await persistCategoryCap(savedCategoryId, form.monthlyCapToman);
+        }
       }
       resetForm();
     };
@@ -290,11 +358,13 @@ export function ManageCategoriesView() {
   };
 
   const handleEdit = (cat: Category) => {
+    const cap = capsByCategoryId.get(cat.id);
     setForm({
       editingId: cat.id,
       name: cat.name,
       color: cat.color,
       parentId: cat.parent_id,
+      monthlyCapToman: cap ? String(cap.monthly_limit_toman) : '',
     });
   };
 
@@ -528,6 +598,24 @@ export function ManageCategoriesView() {
             </div>
           )}
 
+          {activeKind === 'expense' && (
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                سقف هزینه ماهانه (تومان، اختیاری)
+              </label>
+              <FormattedNumberInput
+                value={form.monthlyCapToman}
+                onValueChange={(value) => setForm((prev) => ({ ...prev, monthlyCapToman: value }))}
+                className="w-full bg-[#222436] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-500 text-left"
+                dir="ltr"
+                placeholder="مثلا ۵,۰۰۰,۰۰۰"
+              />
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                هزینه زیرمجموعه‌ها هم در محاسبه لحاظ می‌شود.
+              </p>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isSubmitting}
@@ -564,6 +652,7 @@ export function ManageCategoriesView() {
                 onEdit={handleEdit}
                 onDelete={handleDelete}
                 pendingIds={pendingCategoryIds}
+                capsByCategoryId={capsByCategoryId}
               />
             ))}
           </SortableContext>
@@ -595,6 +684,7 @@ interface CategoryNodeProps {
   onEdit: (c: Category) => void;
   onDelete: (c: Category) => void;
   pendingIds: Set<string>;
+  capsByCategoryId: Map<string, CategorySpendingCap>;
 }
 
 function CategoryNode({
@@ -604,10 +694,12 @@ function CategoryNode({
   onEdit,
   onDelete,
   pendingIds,
+  capsByCategoryId,
 }: CategoryNodeProps) {
   const kids = childrenByParent.get(category.id) ?? [];
   const compact = depth > 0;
   const pending = pendingIds.has(category.id);
+  const capLimitToman = capsByCategoryId.get(category.id)?.monthly_limit_toman ?? null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: category.id });
   return (
     <div className="space-y-2">
@@ -636,6 +728,11 @@ function CategoryNode({
           >
             {category.name}
           </span>
+          {capLimitToman != null && capLimitToman > 0 && (
+            <span className="text-[10px] text-amber-400/80 shrink-0">
+              سقف {Number(capLimitToman).toLocaleString('en-US')}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
@@ -668,6 +765,7 @@ function CategoryNode({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 pendingIds={pendingIds}
+                capsByCategoryId={capsByCategoryId}
               />
             ))}
           </SortableContext>

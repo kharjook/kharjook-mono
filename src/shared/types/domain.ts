@@ -19,7 +19,11 @@ export type CategoryKind = 'asset' | 'income' | 'expense';
 export type LoanType = 'expense' | 'loan';
 export type LoanIntervalPeriod = 'day' | 'week' | 'month' | 'year';
 export type NotificationReportInterval = 'daily' | 'weekly';
-export type NotificationDeliveryKind = 'daily_report' | 'loan_reminder' | 'expense_alert';
+export type NotificationDeliveryKind =
+  | 'daily_report'
+  | 'loan_reminder'
+  | 'expense_alert'
+  | 'category_cap_alert';
 export type GoalScope = 'asset' | 'asset_group';
 export type GoalTargetKind = 'quantity' | 'allocation_percent';
 
@@ -32,6 +36,15 @@ export interface Category {
   parent_id: string | null;
   order_index?: number;
   created_at?: string;
+}
+
+export interface CategorySpendingCap {
+  id: string;
+  user_id: string;
+  category_id: string;
+  monthly_limit_toman: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Asset {
