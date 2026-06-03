@@ -99,26 +99,44 @@ function deriveWalletAmount(
 
 /** Holdings including TRANSFER-acquired/disposed quantities. */
 export function assetHolding(assetId: string, transactions: Transaction[]): number {
+  const isAcquire = (tx: Transaction) => {
+    if (tx.type === 'BUY' || tx.type === 'INCOME') {
+      return tx.asset_id === assetId || tx.target_asset_id === assetId;
+    }
+    if (tx.type === 'TRANSFER') {
+      return tx.target_asset_id === assetId;
+    }
+    return false;
+  };
+  const isDispose = (tx: Transaction) => {
+    if (tx.type === 'SELL' || tx.type === 'EXPENSE') {
+      return tx.asset_id === assetId || tx.source_asset_id === assetId;
+    }
+    if (tx.type === 'TRANSFER') {
+      return tx.source_asset_id === assetId;
+    }
+    return false;
+  };
+  const txAmountForAsset = (tx: Transaction): number => {
+    if (tx.type === 'BUY' || tx.type === 'INCOME') {
+      return Number(tx.target_amount ?? tx.amount);
+    }
+    if (tx.type === 'SELL' || tx.type === 'EXPENSE') {
+      return Number(tx.source_amount ?? tx.amount);
+    }
+    if (isAcquire(tx)) return Number(tx.target_amount ?? tx.amount);
+    return Number(tx.source_amount ?? tx.amount);
+  };
+
   let total = 0;
   for (const tx of transactions) {
-    const isAcquire =
-      tx.type === 'BUY' ||
-      tx.type === 'INCOME' ||
-      (tx.type === 'TRANSFER' && tx.target_asset_id === assetId);
-    const isDispose =
-      tx.type === 'SELL' ||
-      tx.type === 'EXPENSE' ||
-      (tx.type === 'TRANSFER' && tx.source_asset_id === assetId);
-    if (!isAcquire && !isDispose) continue;
+    const acquiring = isAcquire(tx);
+    const disposing = isDispose(tx);
+    if (!acquiring && !disposing) continue;
 
-    let amount = 0;
-    if (isAcquire) {
-      amount = Number(tx.amount ?? tx.target_amount ?? 0);
-    } else {
-      amount = Number(tx.amount ?? tx.source_amount ?? 0);
-    }
+    const amount = txAmountForAsset(tx);
     if (!Number.isFinite(amount) || amount <= 0) continue;
-    total += isAcquire ? amount : -amount;
+    total += acquiring ? amount : -amount;
   }
   return total;
 }
