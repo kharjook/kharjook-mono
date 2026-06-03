@@ -49,7 +49,8 @@ import { TopAllocationCard } from '@/features/dashboard/components/TopAllocation
 import { DistributionChartCard } from '@/features/dashboard/components/DistributionChartCard';
 import { buildYearCashflowByMonth } from '@/features/dashboard/utils/year-cashflow';
 import { CategoryCapsWidget } from '@/features/dashboard/components/CategoryCapsWidget';
-import type { CategorySpendingCap } from '@/shared/types/domain';
+import { PendingChecksWidget } from '@/features/dashboard/components/PendingChecksWidget';
+import type { CategorySpendingCap, Check } from '@/shared/types/domain';
 
 export type HomeGoalRow = {
   id: string;
@@ -81,6 +82,7 @@ export function HomeTab() {
     Array<LoanInstallment & { loanTitle?: string; loanCurrency?: Loan['currency'] }>
   >([]);
   const [spendingCaps, setSpendingCaps] = useState<CategorySpendingCap[]>([]);
+  const [pendingChecks, setPendingChecks] = useState<Check[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -89,6 +91,23 @@ export function HomeTab() {
       const { data } = await supabase.from('category_spending_caps').select('*');
       if (!mounted) return;
       setSpendingCaps((data ?? []) as CategorySpendingCap[]);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+    void (async () => {
+      const { data } = await supabase
+        .from('checks')
+        .select('*')
+        .is('deleted_at', null)
+        .order('due_date_string', { ascending: true });
+      if (!mounted) return;
+      setPendingChecks((data ?? []) as Check[]);
     })();
     return () => {
       mounted = false;
@@ -634,6 +653,8 @@ export function HomeTab() {
       />
 
       <CategoryCapsWidget caps={spendingCaps} />
+
+      <PendingChecksWidget checks={pendingChecks} />
 
       <div className="grid grid-cols-2 gap-3">
         <MetricCard
