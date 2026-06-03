@@ -3,6 +3,7 @@ import { createSupabaseAdminClient } from '@/shared/lib/supabase/admin';
 import type { TelegramConnection, Wallet } from '@/shared/types/domain';
 import { clearBotFlow, getConnectionByChatId, setBotFlow } from '@/features/notifications/telegram/bot-nav';
 import { handleQuickAddCallback } from '@/features/notifications/telegram/bot-quick-add';
+import { handleSmsImportCallback } from '@/features/notifications/telegram/bot-sms-import';
 import { undoLastBotTransaction } from '@/features/notifications/services/bot-undo-transaction';
 import { handleWalletInfoCallback } from '@/features/notifications/services/bot-wallet-info';
 import {
@@ -164,6 +165,11 @@ export async function handleBotCallback(input: {
 
   if (data.startsWith('qa:')) {
     await handleQuickAddCallback(chatId, data, connection, callbackQueryId, messageId);
+    return;
+  }
+
+  if (data.startsWith('si:')) {
+    await handleSmsImportCallback(chatId, data, connection, callbackQueryId, messageId);
     return;
   }
 

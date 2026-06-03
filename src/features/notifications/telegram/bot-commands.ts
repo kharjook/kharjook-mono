@@ -36,6 +36,13 @@ import {
   type QuickAddFlow,
 } from '@/features/notifications/telegram/bot-quick-add';
 import {
+  handleSmsImportMessage,
+  isSmsImportActive,
+  startSmsImportPrompt,
+  tryAutoParseBankSms,
+  type SmsImportFlow,
+} from '@/features/notifications/telegram/bot-sms-import';
+import {
   ALL_BOT_BUTTONS,
   BOT_LINKED_SUCCESS,
   BOT_WELCOME_LINKED,
@@ -53,6 +60,7 @@ import {
   BTN_OVERDUE_DEBTS,
   BTN_PORTFOLIO,
   BTN_QUICK_ADD,
+  BTN_SMS_IMPORT,
   BTN_QA_CANCEL,
   BTN_QA_EXPENSE,
   BTN_QA_INCOME,
@@ -182,6 +190,16 @@ export async function handleBotMessage(chatId: number, text: string): Promise<vo
       );
       if (handled) return;
     }
+
+    if (isSmsImportActive(flow)) {
+      const handled = await handleSmsImportMessage(
+        chatId,
+        text,
+        connection,
+        flow as unknown as SmsImportFlow
+      );
+      if (handled) return;
+    }
   }
 
   if (text === BTN_MENU_CASHFLOW) {
@@ -211,6 +229,12 @@ export async function handleBotMessage(chatId: number, text: string): Promise<vo
       hintForMenu('settings'),
       await settingsKeyboardForUser(conn.user_id)
     );
+    return;
+  }
+
+  if (text === BTN_SMS_IMPORT) {
+    if (!(await requireConnection(chatId))) return;
+    await startSmsImportPrompt(chatId);
     return;
   }
 
@@ -353,6 +377,9 @@ export async function handleBotMessage(chatId: number, text: string): Promise<vo
   if (ALL_BOT_BUTTONS.has(text)) return;
 
   if (connection) {
+    const autoParsed = await tryAutoParseBankSms(chatId, connection, text);
+    if (autoParsed) return;
+
     const stack = await getMenuStack(chatId);
     const menu = stack[stack.length - 1] ?? 'main';
     if (menu === 'settings') {

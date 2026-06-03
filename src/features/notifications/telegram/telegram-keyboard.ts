@@ -7,6 +7,7 @@ export const BTN_MENU_CASHFLOW = '📊 درآمد و هزینه';
 export const BTN_MENU_REPORTS = '📋 گزارش‌ها';
 export const BTN_MENU_PRICES = '💰 قیمت‌ها';
 export const BTN_QUICK_ADD = '⚡ ثبت سریع';
+export const BTN_SMS_IMPORT = '📩 پیامک بانکی';
 export const BTN_MENU_SETTINGS = '⚙️ تنظیمات';
 
 /** Cashflow submenu */
@@ -38,6 +39,7 @@ export const ALL_BOT_BUTTONS = new Set([
   BTN_MENU_REPORTS,
   BTN_MENU_PRICES,
   BTN_QUICK_ADD,
+  BTN_SMS_IMPORT,
   BTN_MENU_SETTINGS,
   BTN_CASHFLOW_TODAY,
   BTN_CASHFLOW_MONTH,
@@ -71,6 +73,7 @@ export function buildMainReplyKeyboard(): TelegramReplyMarkup {
   return {
     keyboard: [
       [{ text: BTN_MENU_CASHFLOW }, { text: BTN_QUICK_ADD }],
+      [{ text: BTN_SMS_IMPORT }],
       [{ text: BTN_MENU_REPORTS }, { text: BTN_MENU_PRICES }],
       [{ text: BTN_MENU_SETTINGS }],
     ],
@@ -153,7 +156,7 @@ export const BOT_WELCOME_LINKED = `👋 به خرجوک خوش آمدید!
 
 منوی اصلی به‌روز شد. اگر دکمه‌ها قدیمی‌اند /start بزنید.
 
-• درآمد/هزینه · ثبت سریع · گزارش‌ها · قیمت‌ها · تنظیمات
+• درآمد/هزینه · ثبت سریع · پیامک بانکی · گزارش‌ها · قیمت‌ها · تنظیمات
 
 ⏰ یادآور قسط‌های امروز ساعت ۹ صبح — از تنظیمات.`;
 
